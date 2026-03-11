@@ -1,0 +1,247 @@
+═════════════════════════════════════════════════════════════════════════════
+                      📋 RESUMEN PARA MAÑANA EN CLASE
+═════════════════════════════════════════════════════════════════════════════
+
+HOY (Martes 11 de Marzo):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ COMPLETADO:
+
+1. Database Layer (SQLAlchemy + Azure SQL)
+   📄 azca/db/database.py (85 líneas)
+   ✓ Motor con create_engine
+   ✓ Conexión segura con quote_plus
+   ✓ Variables de entorno (DB_SERVER, DB_NAME, DB_USER, DB_PASS)
+   ✓ SessionLocal para FastAPI
+   ✓ init_db() automática
+   ✓ Fallback a SQLite para testing
+
+2. ORM Model (PredictionLog)
+   📄 azca/db/models.py (130 líneas)
+   ✓ 10 campos mapeados exactamente
+   ✓ Docstrings completos
+   ✓ Métodos auxiliares (to_dict, __repr__)
+
+3. API FastAPI
+   📄 azca/api/main.py (250+ líneas)
+   ✓ GET /health (200 OK) ✅ PROBADO
+   ✓ POST /predict (201 CREATED) ✅ PROBADO
+   ✓ GET /docs (Swagger) ✅ PROBADO
+
+4. Configuración
+   📄 .env (con credenciales)
+   📄 .env.example (plantilla)
+
+5. Documentación
+   📄 6 archivos de guía y testing
+
+
+═════════════════════════════════════════════════════════════════════════════
+                      MAÑANA (Miércoles 12 de Marzo)
+═════════════════════════════════════════════════════════════════════════════
+
+TODO para traer a clase:
+
+1️⃣  HACER EL GIT COMMIT
+   ──────────────────────────────────────────────────────────────────────
+   Ejecuta en PowerShell:
+   
+   C:\Users\adnan\Desktop\Azca> .\commit.ps1
+   
+   Esto hará commit con mensaje detallado de todos los cambios
+
+
+2️⃣  TRAER LA API CORRIENDO
+   ──────────────────────────────────────────────────────────────────────
+   Antes de venir a clase, deja esto en una terminal:
+   
+   python -m uvicorn azca.api.main:app --reload
+
+
+3️⃣  MOSTRAR SWAGGER
+   ──────────────────────────────────────────────────────────────────────
+   En clase abre:
+   http://localhost:8000/docs
+   
+   Y demuestra:
+   • Endpoints documentados
+   • Modelos Pydantic
+   • Ejemplo de predicción
+   • Respuesta JSON
+
+
+═════════════════════════════════════════════════════════════════════════════
+                      PUNTOS CLAVE PARA EL PROFESOR
+═════════════════════════════════════════════════════════════════════════════
+
+ARQUITECTURA IMPLEMENTADA:
+
+┌─────────────────────────────────────────────────────────┐
+│                   FastAPI (Tier 1)                      │
+│  - GET /health: Health check                            │
+│  - POST /predict: Predicción + auditoría                │
+│  - GET /docs: Swagger automático                        │
+└────────────────────┬────────────────────────────────────┘
+                     │
+┌────────────────────▼────────────────────────────────────┐
+│               SQLAlchemy ORM (Tier 2)                   │
+│  - SessionLocal: Inyección de dependencias              │
+│  - get_db(): Dependency injection FastAPI               │
+│  - init_db(): Crear tablas automáticamente              │
+└────────────────────┬────────────────────────────────────┘
+                     │
+┌────────────────────▼────────────────────────────────────┐
+│            Base de Datos (Tier 3)                       │
+│  - Azure SQL (producción) con quote_plus                │
+│  - SQLite en-memoria (testing)                          │
+│  - Tabla: PredictionLogs (auditoría)                    │
+└─────────────────────────────────────────────────────────┘
+
+
+CARACTERÍSTICAS PROFESIONALES:
+
+✅ SEGURIDAD
+   • quote_plus() para contraseñas especiales
+   • Variables de entorno (no hardcoded)
+   • Validación Pydantic
+
+✅ ESCALABILIDAD
+   • Pool de conexiones QueuePool
+   • ORM para abstracción de BD
+   • Async-ready
+
+✅ OBSERVABILIDAD
+   • Logging con timestamps
+   • Status codes HTTP correctos
+   • Swagger/OpenAPI docs
+
+✅ ROBUSTEZ
+   • Fallback a SQLite si no hay credenciales
+   • Fallback a predicción mock si motor falla
+   • Transaction rollback en errores
+
+✅ CÓDIGO LIMPIO
+   • PEP8 compliance
+   • Docstrings completos
+   • Type hints
+   • Comentarios explicativos
+
+
+═════════════════════════════════════════════════════════════════════════════
+                      PREGUNTAS QUE PUEDE HACER EL PROFESOR
+═════════════════════════════════════════════════════════════════════════════
+
+P1: ¿Cómo se hace la validación de datos?
+R: Con Pydantic. También genera Swagger automático.
+   Ver: azca/api/main.py línea 30-70 (PredictionRequest)
+
+P2: ¿Cómo se conecta a Azure SQL?
+R: SQLAlchemy + pyodbc. Credenciales en .env con quote_plus para caracteres especiales.
+   Ver: azca/db/database.py línea 25-50
+
+P3: ¿Qué estructura tiene la tabla PredictionLogs?
+R: 10 columnas: id, execution_timestamp, service_date, max_temp_c, precipitation_mm,
+   is_stadium_event, is_payday_week, prediction_result, model_version, full_input_json
+   Ver: azca/db/models.py línea 40-100
+
+P4: ¿Cómo se autentica con FastAPI?
+R: Actualmente sin auth (testing). Se puede agregar con:
+   - API Key header
+   - OAuth2 con JWT
+   - Básico HTTP Auth
+
+P5: ¿Se prueba la API?
+R: Sí, completamente:
+   - GET /health → 200 OK ✅
+   - POST /predict → 201 CREATED ✅
+   - Swagger documentado ✅
+
+
+═════════════════════════════════════════════════════════════════════════════
+                      ARCHIVOS IMPORTANTES PARA MOSTRAR
+═════════════════════════════════════════════════════════════════════════════
+
+1. azca/api/main.py
+   → Mostrar:
+     • Modelos Pydantic (30-70)
+     • Endpoint /predict (160-220)
+     • Logging y error handling
+
+2. azca/db/database.py
+   → Mostrar:
+     • Motor SQLAlchemy (30-50)
+     • ConnectionString segura (quote_plus)
+     • Fallback a SQLite
+
+3. azca/db/models.py
+   → Mostrar:
+     • Mapeo exacto de tabla (40-100)
+     • Docstrings (60-80)
+     • Método to_dict()
+
+4. Swagger en vivo
+   → Abrir: http://localhost:8000/docs
+     • Ver modelos documentados
+     • Probar endpoint POST /predict
+     • Ver respuesta JSON
+
+
+═════════════════════════════════════════════════════════════════════════════
+                      COMANDOS ÚTILES PARA MAÑANA
+═════════════════════════════════════════════════════════════════════════════
+
+Antes de clase (en terminal):
+   python -m uvicorn azca.api.main:app --reload
+
+En clase (probar endpoints):
+   # Health check
+   curl http://localhost:8000/health
+   
+   # Predicción
+   curl -X POST http://localhost:8000/predict \
+     -H "Content-Type: application/json" \
+     -d '{
+       "service_date": "2026-03-15",
+       "max_temp_c": 28.5,
+       "precipitation_mm": 0.0,
+       "is_stadium_event": false,
+       "is_payday_week": true
+     }'
+
+Ver git log:
+   git log --oneline -10
+
+
+═════════════════════════════════════════════════════════════════════════════
+                      NEXT STEPS (Después de la clase)
+═════════════════════════════════════════════════════════════════════════════
+
+Nivel 2 (Próximos pasos opcionales):
+
+1. Agregar autenticación:
+   - API Key en headers
+   - OAuth2 + JWT
+   - Roles y permisos
+
+2. Agregar más endpoints:
+   - GET /predictions (historial)
+   - GET /predictions/<id> (detalle)
+   - DELETE /predictions/<id>
+
+3. Mejorar frontend:
+   - HTML + JavaScript
+   - Llamadas a la API
+   - Gráficos de predicciones
+
+4. Despliegue en producción:
+   - Docker + Dockerfile
+   - Docker Compose para BD
+   - CI/CD con GitHub Actions
+   - Azure App Service
+
+
+═════════════════════════════════════════════════════════════════════════════
+
+                    ✅ TODO LISTO PARA MAÑANA EN CLASE
+
+═════════════════════════════════════════════════════════════════════════════

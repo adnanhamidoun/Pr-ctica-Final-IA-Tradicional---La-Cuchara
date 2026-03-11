@@ -1,0 +1,74 @@
+═════════════════════════════════════════════════════════════════════════════
+                            ⚡ QUICKSTART ⚡
+═════════════════════════════════════════════════════════════════════════════
+
+🔧 PASO 1: Instalar dependencias
+──────────────────────────────────
+Abre PowerShell en C:\Users\adnan\Desktop\Azca
+
+Copia y pega:
+   pip install fastapi uvicorn sqlalchemy python-dotenv
+
+
+🚀 PASO 2: Ejecutar la API
+──────────────────────────
+   uvicorn azca.api.main:app --reload
+
+
+✅ PASO 3: Verificar que funciona
+──────────────────────────────────
+Abre en el navegador:
+   http://localhost:8000/health
+
+Deberías ver:
+   {"status": "healthy", "message": "API y base de datos funcionando correctamente"}
+
+
+📚 PASO 4: Ver documentación
+─────────────────────────────
+Abre:
+   http://localhost:8000/docs
+
+Ahí puedes probar los endpoints directamente
+
+
+🧪 PASO 5: Probar una predicción (desde PowerShell)
+────────────────────────────────────────────────────
+$body = @{
+    service_date = "2026-03-15"
+    max_temp_c = 28.5
+    precipitation_mm = 0.0
+    is_stadium_event = $false
+    is_payday_week = $true
+} | ConvertTo-Json
+
+Invoke-RestMethod -Uri "http://localhost:8000/predict" `
+  -Method POST `
+  -Headers @{"Content-Type"="application/json"} `
+  -Body $body
+
+
+═════════════════════════════════════════════════════════════════════════════
+                            LISTO! 🎉
+═════════════════════════════════════════════════════════════════════════════
+
+✅ Archivos creados:
+   • azca/db/database.py (conexión Azure SQL)
+   • azca/db/models.py (modelo PredictionLog)
+   • azca/api/main.py (API con 2 endpoints)
+   • .env.example (plantilla)
+
+✅ Endpoints disponibles:
+   • GET /health (verificar que funciona)
+   • POST /predict (hacer predicción + guardar en BD)
+   • GET /docs (documentación interactiva)
+
+✅ Características:
+   • Validación Pydantic automática
+   • Documentación Swagger completa
+   • Auditoría en Azure SQL
+   • Manejo profesional de errores
+
+═════════════════════════════════════════════════════════════════════════════
+Preguntas? Ver PRUEBAS.md para más detalles
+═════════════════════════════════════════════════════════════════════════════

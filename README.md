@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Azca ML Service
 
 Model-as-a-Service prediction engine para servicios de restaurante.

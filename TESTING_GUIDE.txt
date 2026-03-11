@@ -1,0 +1,93 @@
+"""
+Plan de Pruebas - AZCA Prediction API
+=====================================
+
+Este archivo describe cómo probar la API paso a paso.
+"""
+
+print("""
+╔════════════════════════════════════════════════════════════════════════════╗
+║                  🧪 PRUEBAS DE LA API - GUÍA RÁPIDA                        ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+OPCIÓN 1: Prueba sin BD (Recomendado para inicio rápido)
+═════════════════════════════════════════════════════════════════════════════
+
+1️⃣  INSTALAR DEPENDENCIAS:
+   En PowerShell (dentro del entorno virtual):
+   
+   pip install fastapi uvicorn pydantic sqlalchemy python-dotenv
+
+2️⃣  CREAR VERSIÓN MOCK (sin SQL):
+   Ejecuta: python test_mock_api.py
+   
+   Esto prueba:
+   - FastAPI se carga
+   - Modelos Pydantic validan correctamente
+   - Endpoints responden
+
+3️⃣  EJECUTAR LA API EN MOCK MODE:
+   uvicorn azca.api.main:app --reload --host 0.0.0.0 --port 8000
+   
+   Luego abre: http://localhost:8000/docs
+
+
+OPCIÓN 2: Prueba completa con BD Real (Azure SQL)
+═════════════════════════════════════════════════════════════════════════════
+
+1️⃣  CONFIGURAR .env:
+   Asegúrate de que el archivo .env tiene credenciales correctas:
+   - DB_SERVER=tu_servidor.database.windows.net
+   - DB_NAME=tu_bd
+   - DB_USER=tu_usuario
+   - DB_PASS=tu_contraseña
+
+2️⃣  INSTALAR DRIVER ODBC:
+   pip install pyodbc
+
+3️⃣  CREAR TABLAS EN AZURE SQL:
+   Ejecuta el script azca/db/schema.sql en tu Azure SQL
+
+4️⃣  EJECUTAR API CON BD:
+   uvicorn azca.api.main:app --reload
+
+5️⃣  PROBAR ENDPOINTS:
+   
+   a) Health Check:
+      curl http://localhost:8000/health
+   
+   b) Predicción:
+      curl -X POST http://localhost:8000/predict \\
+        -H "Content-Type: application/json" \\
+        -d '{
+          "service_date": "2026-03-15",
+          "max_temp_c": 28.5,
+          "precipitation_mm": 0.0,
+          "is_stadium_event": false,
+          "is_payday_week": true
+        }'
+
+
+OPCIÓN 3: Tests Automatizados
+═════════════════════════════════════════════════════════════════════════════
+
+Instalar pytest:
+   pip install pytest pytest-asyncio httpx
+
+Ejecutar:
+   pytest azca/tests/ -v
+
+═════════════════════════════════════════════════════════════════════════════
+
+🎯 CHECKLIST DE VALIDACIÓN:
+
+✅ Imports funcionan
+✅ FastAPI se inicia sin errores  
+✅ Swagger docs están en /docs
+✅ /health retorna {"status": "healthy"}
+✅ /predict acepta JSON válido
+✅ /predict guarda en BD
+✅ Error handling funciona (datos inválidos, BD down, etc)
+
+═════════════════════════════════════════════════════════════════════════════
+""")
