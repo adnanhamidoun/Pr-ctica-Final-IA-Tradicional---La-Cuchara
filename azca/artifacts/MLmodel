@@ -1,0 +1,45 @@
+artifact_path: outputs/mlflow-model
+flavors:
+  python_function:
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.sklearn
+    model_path: model.pkl
+    predict_fn: predict
+    python_version: 3.10.19
+  sklearn:
+    code: null
+    pickled_model: model.pkl
+    serialization_format: pickle
+    sklearn_version: 1.5.1
+metadata:
+  azureml.base_image: mcr.microsoft.com/azureml/curated/ai-ml-automl:38
+  azureml.engine: automl
+mlflow_version: 2.15.1
+model_size_bytes: 8758853
+model_uuid: 65607290393048f49fa17fd20577aaf4
+run_id: goofy_pocket_0vkbd193zb_211
+signature:
+  inputs: '[{"type": "datetime", "name": "service_date", "required": true}, {"type":
+    "integer", "name": "restaurant_id", "required": true}, {"type": "float", "name":
+    "max_temp_c", "required": true}, {"type": "float", "name": "precipitation_mm",
+    "required": true}, {"type": "boolean", "name": "is_rain_service_peak", "required":
+    true}, {"type": "boolean", "name": "is_stadium_event", "required": true}, {"type":
+    "boolean", "name": "is_azca_event", "required": true}, {"type": "boolean", "name":
+    "is_holiday", "required": true}, {"type": "boolean", "name": "is_bridge_day",
+    "required": true}, {"type": "boolean", "name": "is_payday_week", "required": true},
+    {"type": "boolean", "name": "is_business_day", "required": true}, {"type": "integer",
+    "name": "services_lag_7", "required": true}, {"type": "float", "name": "avg_4_weeks",
+    "required": true}, {"type": "integer", "name": "capacity_limit", "required": true},
+    {"type": "integer", "name": "table_count", "required": true}, {"type": "integer",
+    "name": "min_service_duration", "required": true}, {"type": "string", "name":
+    "terrace_setup_type", "required": true}, {"type": "boolean", "name": "opens_weekends",
+    "required": true}, {"type": "boolean", "name": "has_wifi", "required": true},
+    {"type": "string", "name": "restaurant_segment", "required": true}, {"type": "float",
+    "name": "menu_price", "required": true}, {"type": "integer", "name": "dist_office_towers",
+    "required": true}, {"type": "float", "name": "google_rating", "required": true},
+    {"type": "string", "name": "cuisine_type", "required": true}]'
+  outputs: '[{"type": "tensor", "tensor-spec": {"dtype": "int64", "shape": [-1]}}]'
+  params: null
+utc_time_created: '2026-03-10 15:00:10.012926'

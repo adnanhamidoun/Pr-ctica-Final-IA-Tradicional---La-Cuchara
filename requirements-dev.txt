@@ -1,0 +1,17 @@
+# Development dependencies
+-r requirements.txt
+
+# Testing
+pytest==9.0.2
+
+# Jupyter & Notebooks
+jupyter==1.0.0
+jupyter_client==8.8.0
+jupyter_core==5.9.1
+ipykernel==7.2.0
+ipython==8.38.0
+
+# Code quality (optional)
+black==24.1.1
+flake8==7.1.0
+mypy==1.13.0

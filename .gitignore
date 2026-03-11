@@ -1,0 +1,103 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+venv/
+ENV/
+env/
+azca_310_env/  # Project-specific venv
+.venv
+
+# IDE & Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.sublime-project
+*.sublime-workspace
+.project
+.pydevproject
+.settings/
+*.iml
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.hypothesis/
+.nox/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints
+
+# IPython
+.ipython/
+profile_*/
+
+# Environments
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+*.log
+*.pot
+
+# Package managers
+package-lock.json
+yarn.lock
+Pipfile.lock
+
+# ML/Data
+*.pkl
+*.joblib
+*.h5
+*.pth
+*.onnx
+*.pb
+data/
+models/
+outputs/
+artifacts/MLmodel/  # Ignore model metadata but keep folder structure
+# Keep .gitkeep files to track empty directories
+!**/.gitkeep
+
+# Development
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.ruff_cache/
+
+# Notebooks
+notebooks_research/  # Optional: if you want to track, remove this line
