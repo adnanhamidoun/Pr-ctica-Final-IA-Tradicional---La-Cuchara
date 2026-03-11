@@ -1,3 +1,0 @@
-#!C:\Users\adnan\Desktop\Azca\azca_310_env\Scripts\python.exe
-from numba.pycc import main
-main()
