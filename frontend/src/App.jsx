@@ -16,6 +16,10 @@ function App() {
   const [isAzcaEvent, setIsAzcaEvent] = useState(false)
   const [starterResult, setStarterResult] = useState(null)
   const [starterLoading, setStarterLoading] = useState(false)
+  const [mainResult, setMainResult] = useState(null)
+  const [mainLoading, setMainLoading] = useState(false)
+  const [dessertResult, setDessertResult] = useState(null)
+  const [dessertLoading, setDessertLoading] = useState(false)
   
   // Campos de predicción (cargados automáticamente desde BD)
   const [capacityLimit, setCapacityLimit] = useState('')
@@ -214,6 +218,82 @@ function App() {
     }
   }
 
+  const handlePredictMain = async (e) => {
+    e.preventDefault()
+    
+    if (!restaurantId) {
+      setError("Por favor selecciona un restaurante")
+      return
+    }
+    
+    setMainLoading(true)
+    setError(null)
+    setMainResult(null)
+
+    try {
+      const mainData = {
+        restaurant_id: parseInt(restaurantId),
+        service_date: serviceDate,
+      }
+
+      console.log("🍖 Prediciendo platos principales:", mainData)
+
+      const response = await fetch('/predict/main', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(mainData)
+      })
+
+      if (!response.ok) throw new Error(`HTTP error: ${response.status}`)
+      const data = await response.json()
+      console.log("✅ Platos principales predichos:", data)
+      setMainResult(data)
+    } catch (err) {
+      console.error("❌ Error prediciendo mains:", err)
+      setError(err.message)
+    } finally {
+      setMainLoading(false)
+    }
+  }
+
+  const handlePredictDessert = async (e) => {
+    e.preventDefault()
+    
+    if (!restaurantId) {
+      setError("Por favor selecciona un restaurante")
+      return
+    }
+    
+    setDessertLoading(true)
+    setError(null)
+    setDessertResult(null)
+
+    try {
+      const dessertData = {
+        restaurant_id: parseInt(restaurantId),
+        service_date: serviceDate,
+      }
+
+      console.log("🍰 Prediciendo postres:", dessertData)
+
+      const response = await fetch('/predict/dessert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dessertData)
+      })
+
+      if (!response.ok) throw new Error(`HTTP error: ${response.status}`)
+      const data = await response.json()
+      console.log("✅ Postres predichos:", data)
+      setDessertResult(data)
+    } catch (err) {
+      console.error("❌ Error prediciendo desserts:", err)
+      setError(err.message)
+    } finally {
+      setDessertLoading(false)
+    }
+  }
+
   if (mode === 'test') {
     return <TestMode onBack={() => setMode('user')} />
   }
@@ -328,21 +408,19 @@ function App() {
                 </div>
 
                 {/* Botones */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-2 gap-2 sm:gap-3">
                   <button
                     type="submit"
                     disabled={loading || !restaurantId || restaurants.length === 0}
-                    className="py-3 sm:py-4 bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-500 hover:via-purple-500 hover:to-pink-500 text-white font-bold text-sm sm:text-lg rounded-xl shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    className="py-2 sm:py-3 bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-500 hover:via-purple-500 hover:to-pink-500 text-white font-bold text-xs sm:text-base rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1 sm:gap-2"
                   >
                     {loading ? (
-                      <>
-                        <span className="animate-spin">⏳</span>
-                        <span className="hidden sm:inline">Procesando...</span>
-                      </>
+                      <span className="animate-spin text-sm sm:text-base">⏳</span>
                     ) : (
                       <>
-                        <span>🚀</span>
-                        <span>Demanda</span>
+                        <span className="text-sm sm:text-lg">🚀</span>
+                        <span className="hidden sm:inline">Demanda</span>
+                        <span className="sm:hidden text-xs">Demand</span>
                       </>
                     )}
                   </button>
@@ -351,17 +429,49 @@ function App() {
                     type="button"
                     onClick={handlePredictStarter}
                     disabled={starterLoading || !restaurantId || restaurants.length === 0}
-                    className="py-3 sm:py-4 bg-gradient-to-r from-amber-600 via-orange-600 to-red-600 hover:from-amber-500 hover:via-orange-500 hover:to-red-500 text-white font-bold text-sm sm:text-lg rounded-xl shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    className="py-2 sm:py-3 bg-gradient-to-r from-amber-600 via-orange-600 to-red-600 hover:from-amber-500 hover:via-orange-500 hover:to-red-500 text-white font-bold text-xs sm:text-base rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1 sm:gap-2"
                   >
                     {starterLoading ? (
-                      <>
-                        <span className="animate-spin">⏳</span>
-                        <span className="hidden sm:inline">Cargando...</span>
-                      </>
+                      <span className="animate-spin text-sm sm:text-base">⏳</span>
                     ) : (
                       <>
-                        <span>🍽️</span>
-                        <span>Starters</span>
+                        <span className="text-sm sm:text-lg">🍽️</span>
+                        <span className="hidden sm:inline">Starters</span>
+                        <span className="sm:hidden text-xs">Start</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handlePredictMain}
+                    disabled={mainLoading || !restaurantId || restaurants.length === 0}
+                    className="py-2 sm:py-3 bg-gradient-to-r from-green-600 via-emerald-600 to-teal-600 hover:from-green-500 hover:via-emerald-500 hover:to-teal-500 text-white font-bold text-xs sm:text-base rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1 sm:gap-2"
+                  >
+                    {mainLoading ? (
+                      <span className="animate-spin text-sm sm:text-base">⏳</span>
+                    ) : (
+                      <>
+                        <span className="text-sm sm:text-lg">🍖</span>
+                        <span className="hidden sm:inline">Mains</span>
+                        <span className="sm:hidden text-xs">Main</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handlePredictDessert}
+                    disabled={dessertLoading || !restaurantId || restaurants.length === 0}
+                    className="py-2 sm:py-3 bg-gradient-to-r from-rose-600 via-pink-600 to-red-600 hover:from-rose-500 hover:via-pink-500 hover:to-red-500 text-white font-bold text-xs sm:text-base rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1 sm:gap-2"
+                  >
+                    {dessertLoading ? (
+                      <span className="animate-spin text-sm sm:text-base">⏳</span>
+                    ) : (
+                      <>
+                        <span className="text-sm sm:text-lg">🍰</span>
+                        <span className="hidden sm:inline">Desserts</span>
+                        <span className="sm:hidden text-xs">Desst</span>
                       </>
                     )}
                   </button>
@@ -465,11 +575,105 @@ function App() {
                 </div>
               ) : null}
 
+              {/* Resultado Mains */}
+              {mainResult ? (
+                <div className="bg-gradient-to-br from-green-500/20 to-emerald-500/20 border border-green-500/50 backdrop-blur-sm rounded-xl p-4 sm:p-8">
+                  <div className="text-center mb-6 sm:mb-8">
+                    <p className="text-green-300/70 text-xs sm:text-sm font-semibold uppercase tracking-wide mb-2 sm:mb-3">
+                      Top 3 Platos Principales
+                    </p>
+                    <p className="text-green-300 text-sm sm:text-base">Recomendaciones para los segundos</p>
+                  </div>
+
+                  <div className="space-y-3 sm:space-y-4">
+                    {mainResult.top_3_dishes && mainResult.top_3_dishes.map((dish) => (
+                      <div key={dish.rank} className="bg-green-900/30 rounded-lg p-3 sm:p-4 border border-green-500/30 hover:border-green-400/50 transition-all">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <span className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-green-400 to-emerald-400 bg-clip-text text-transparent">
+                              #{dish.rank}
+                            </span>
+                            <span className="text-green-200 font-semibold text-sm sm:text-base">{dish.name}</span>
+                          </div>
+                          <span className="text-green-400 font-bold text-sm sm:text-base">
+                            {Math.round(dish.score * 100)}%
+                          </span>
+                        </div>
+                        <div className="mt-2 h-1.5 bg-green-900/50 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-gradient-to-r from-green-500 to-emerald-400 rounded-full" 
+                            style={{ width: `${dish.score * 100}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="space-y-2 sm:space-y-3 border-t border-green-500/30 pt-3 sm:pt-4 text-xs sm:text-sm mt-4 sm:mt-6">
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="text-green-300/70">Modelo</span>
+                      <span className="text-green-200 font-mono text-right">{mainResult.model_version}</span>
+                    </div>
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="text-green-300/70">Fecha Predicción</span>
+                      <span className="text-green-200 font-mono">{mainResult.service_date}</span>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Resultado Desserts */}
+              {dessertResult ? (
+                <div className="bg-gradient-to-br from-rose-500/20 to-pink-500/20 border border-rose-500/50 backdrop-blur-sm rounded-xl p-4 sm:p-8">
+                  <div className="text-center mb-6 sm:mb-8">
+                    <p className="text-rose-300/70 text-xs sm:text-sm font-semibold uppercase tracking-wide mb-2 sm:mb-3">
+                      Top 3 Postres
+                    </p>
+                    <p className="text-rose-300 text-sm sm:text-base">Recomendaciones para los postres</p>
+                  </div>
+
+                  <div className="space-y-3 sm:space-y-4">
+                    {dessertResult.top_3_dishes && dessertResult.top_3_dishes.map((dish) => (
+                      <div key={dish.rank} className="bg-rose-900/30 rounded-lg p-3 sm:p-4 border border-rose-500/30 hover:border-rose-400/50 transition-all">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <span className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-rose-400 to-pink-400 bg-clip-text text-transparent">
+                              #{dish.rank}
+                            </span>
+                            <span className="text-rose-200 font-semibold text-sm sm:text-base">{dish.name}</span>
+                          </div>
+                          <span className="text-rose-400 font-bold text-sm sm:text-base">
+                            {Math.round(dish.score * 100)}%
+                          </span>
+                        </div>
+                        <div className="mt-2 h-1.5 bg-rose-900/50 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-gradient-to-r from-rose-500 to-pink-400 rounded-full" 
+                            style={{ width: `${dish.score * 100}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="space-y-2 sm:space-y-3 border-t border-rose-500/30 pt-3 sm:pt-4 text-xs sm:text-sm mt-4 sm:mt-6">
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="text-rose-300/70">Modelo</span>
+                      <span className="text-rose-200 font-mono text-right">{dessertResult.model_version}</span>
+                    </div>
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="text-rose-300/70">Fecha Predicción</span>
+                      <span className="text-rose-200 font-mono">{dessertResult.service_date}</span>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
               {/* Placeholder */}
-              {!result && !starterResult && (
+              {!result && !starterResult && !mainResult && !dessertResult && (
                 <div className="bg-gradient-to-br from-slate-700/50 to-slate-600/50 border border-slate-500/30 backdrop-blur-sm rounded-xl p-4 sm:p-8 text-center">
                   <p className="text-slate-400 text-xs sm:text-sm">💡 Completa el formulario</p>
-                  <p className="text-slate-400 text-xs sm:text-sm">y presiona Demanda o Starters</p>
+                  <p className="text-slate-400 text-xs sm:text-sm">y presiona cualquiera de los botones</p>
                 </div>
               )}
             </div>

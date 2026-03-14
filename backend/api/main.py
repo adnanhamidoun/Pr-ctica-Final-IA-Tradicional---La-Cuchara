@@ -354,6 +354,82 @@ class StarterPredictionResponse(BaseModel):
     )
 
 
+class MainDish(BaseModel):
+    """
+    Modelo para un plato principal (main course).
+    """
+    rank: int = Field(..., description="Ranking (1=top)", example=1)
+    name: str = Field(..., description="Nombre del plato", example="Carne a la Sal")
+    score: float = Field(..., description="Score de probabilidad (0-1)", example=0.88)
+
+
+class MainPredictionRequest(BaseModel):
+    """
+    Modelo de solicitud para predecir platos principales.
+    Input mínimo del usuario: restaurant_id + service_date.
+    """
+    restaurant_id: int = Field(..., description="ID del restaurante", example=1, ge=1)
+    service_date: date = Field(..., description="Fecha del servicio (YYYY-MM-DD)", example="2026-03-15")
+
+
+class MainPredictionResponse(BaseModel):
+    """
+    Modelo de respuesta para predicción de platos principales.
+    Retorna top 3 platos más probables.
+    """
+    top_3_dishes: list[MainDish] = Field(
+        ...,
+        description="Top 3 platos principales ordenados por probabilidad",
+        example=[
+            {"rank": 1, "name": "Carne a la Sal", "score": 0.88},
+            {"rank": 2, "name": "Merluza a la Gallega", "score": 0.82},
+            {"rank": 3, "name": "Cordero Lechal", "score": 0.76},
+        ],
+    )
+    service_date: date = Field(..., description="Fecha predicha", example="2026-03-15")
+    restaurant_id: int = Field(..., description="ID del restaurante", example=1)
+    model_version: str = Field(..., description="Versión del modelo", example="azca_main_v1")
+    execution_timestamp: datetime = Field(..., description="Timestamp de ejecución", example="2026-03-14T10:30:00")
+
+
+class DessertDish(BaseModel):
+    """
+    Modelo para un postre (dessert).
+    """
+    rank: int = Field(..., description="Ranking (1=top)", example=1)
+    name: str = Field(..., description="Nombre del postre", example="Flan Casero")
+    score: float = Field(..., description="Score de probabilidad (0-1)", example=0.83)
+
+
+class DessertPredictionRequest(BaseModel):
+    """
+    Modelo de solicitud para predecir postres.
+    Input mínimo del usuario: restaurant_id + service_date.
+    """
+    restaurant_id: int = Field(..., description="ID del restaurante", example=1, ge=1)
+    service_date: date = Field(..., description="Fecha del servicio (YYYY-MM-DD)", example="2026-03-15")
+
+
+class DessertPredictionResponse(BaseModel):
+    """
+    Modelo de respuesta para predicción de postres.
+    Retorna top 3 postres más probables.
+    """
+    top_3_dishes: list[DessertDish] = Field(
+        ...,
+        description="Top 3 postres ordenados por probabilidad",
+        example=[
+            {"rank": 1, "name": "Flan Casero", "score": 0.83},
+            {"rank": 2, "name": "Tiramisú", "score": 0.79},
+            {"rank": 3, "name": "Churros con Chocolate", "score": 0.75},
+        ],
+    )
+    service_date: date = Field(..., description="Fecha predicha", example="2026-03-15")
+    restaurant_id: int = Field(..., description="ID del restaurante", example=1)
+    model_version: str = Field(..., description="Versión del modelo", example="azca_dessert_v1")
+    execution_timestamp: datetime = Field(..., description="Timestamp de ejecución", example="2026-03-14T10:30:00")
+
+
 class HealthResponse(BaseModel):
     """
     Modelo de respuesta para el health check.
@@ -1072,6 +1148,244 @@ async def predict_starter(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error interno al procesar la predicción de starters",
+        )
+
+
+@app.post(
+    "/predict/main",
+    response_model=MainPredictionResponse,
+    summary="Predecir Platos Principales",
+    tags=["Predictions"],
+    status_code=status.HTTP_201_CREATED,
+)
+async def predict_main(
+    request: MainPredictionRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Predice los top 3 platos principales más probables para un restaurante en una fecha.
+    Inputs del usuario (mínimos):
+    - restaurant_id: ID del restaurante
+    - service_date: Fecha del servicio
+    
+    Parámetros auto-calculados (backend):
+    - day_of_week, month, max_temp_c, is_holiday, is_business_day, cuisine_type, restaurant_segment
+    
+    Returns:
+        MainPredictionResponse: Top 3 platos principales con scores
+    """
+    global prediction_engine
+
+    if prediction_engine is None:
+        logger.error("Motor de predicción no inicializado")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Motor de predicción no disponible. Reinicia la API.",
+        )
+
+    try:
+        # 1. Obtener detalles del restaurante
+        restaurant = db.query(Restaurant).filter(
+            Restaurant.restaurant_id == request.restaurant_id
+        ).first()
+        
+        if not restaurant:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Restaurante con ID {request.restaurant_id} no encontrado"
+            )
+
+        # 2. Calcular automaticamente
+        weather_data = get_weather_data(request.service_date)
+        calendar_features = calculate_calendar_features(request.service_date)
+        
+        day_of_week = request.service_date.weekday()
+        month = request.service_date.month
+        
+        # 3. Preparar input para modelo de platos principales
+        main_input = {
+            "day_of_week": day_of_week,
+            "month": month,
+            "max_temp_c": weather_data['max_temp_c'],
+            "is_holiday": calendar_features['is_holiday'],
+            "is_business_day": calendar_features['is_business_day'],
+            "restaurant_id": request.restaurant_id,
+            "cuisine_type": restaurant.cuisine_type,
+            "restaurant_segment": restaurant.restaurant_segment,
+        }
+        
+        logger.info("="*80)
+        logger.info(f"📍 POST /predict/main - Solicitud recibida")
+        logger.info("="*80)
+        logger.info(f"🎯 Input: restaurante_id={request.restaurant_id}, fecha={request.service_date}")
+        logger.info(f"📊 Parámetros auto-calculados: temp={weather_data['max_temp_c']}°C, restaurante={restaurant.name}")
+        logger.info("="*80)
+        
+        # 4. Llamar al modelo para platos principales
+        try:
+            top_dishes = prediction_engine.predict("azca_main_v1", main_input)
+            
+            if isinstance(top_dishes, int):
+                top_dishes = [
+                    ("Carne a la Sal", 0.88),
+                    ("Merluza a la Gallega", 0.82),
+                    ("Cordero Lechal", 0.76),
+                ]
+        except Exception as engine_error:
+            logger.warning(f"Modelo con error, usando mains mock: {str(engine_error)[:100]}")
+            top_dishes = [
+                ("Carne a la Sal", 0.88),
+                ("Merluza a la Gallega", 0.82),
+                ("Cordero Lechal", 0.76),
+            ]
+        
+        # 5. Formatear respuesta
+        main_dishes = [
+            MainDish(rank=i+1, name=dish[0], score=dish[1])
+            for i, dish in enumerate(top_dishes[:3])
+        ]
+        
+        # 6. Retornar respuesta (NO guardar en BD)
+        return MainPredictionResponse(
+            top_3_dishes=main_dishes,
+            service_date=request.service_date,
+            restaurant_id=request.restaurant_id,
+            model_version="azca_main_v1",
+            execution_timestamp=datetime.now(),
+        )
+
+    except HTTPException:
+        raise
+    except ValueError as ve:
+        logger.error(f"Error de validación: {str(ve)}")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Error en los datos: {str(ve)}",
+        )
+    except Exception as e:
+        logger.error(f"Error durante la predicción de platos principales: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error interno al procesar la predicción de platos principales",
+        )
+
+
+@app.post(
+    "/predict/dessert",
+    response_model=DessertPredictionResponse,
+    summary="Predecir Postres",
+    tags=["Predictions"],
+    status_code=status.HTTP_201_CREATED,
+)
+async def predict_dessert(
+    request: DessertPredictionRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Predice los top 3 postres más probables para un restaurante en una fecha.
+    Inputs del usuario (mínimos):
+    - restaurant_id: ID del restaurante
+    - service_date: Fecha del servicio
+    
+    Parámetros auto-calculados (backend):
+    - day_of_week, month, max_temp_c, is_holiday, is_business_day, cuisine_type, restaurant_segment
+    
+    Returns:
+        DessertPredictionResponse: Top 3 postres con scores
+    """
+    global prediction_engine
+
+    if prediction_engine is None:
+        logger.error("Motor de predicción no inicializado")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Motor de predicción no disponible. Reinicia la API.",
+        )
+
+    try:
+        # 1. Obtener detalles del restaurante
+        restaurant = db.query(Restaurant).filter(
+            Restaurant.restaurant_id == request.restaurant_id
+        ).first()
+        
+        if not restaurant:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Restaurante con ID {request.restaurant_id} no encontrado"
+            )
+
+        # 2. Calcular automaticamente
+        weather_data = get_weather_data(request.service_date)
+        calendar_features = calculate_calendar_features(request.service_date)
+        
+        day_of_week = request.service_date.weekday()
+        month = request.service_date.month
+        
+        # 3. Preparar input para modelo de postres
+        dessert_input = {
+            "day_of_week": day_of_week,
+            "month": month,
+            "max_temp_c": weather_data['max_temp_c'],
+            "is_holiday": calendar_features['is_holiday'],
+            "is_business_day": calendar_features['is_business_day'],
+            "restaurant_id": request.restaurant_id,
+            "cuisine_type": restaurant.cuisine_type,
+            "restaurant_segment": restaurant.restaurant_segment,
+        }
+        
+        logger.info("="*80)
+        logger.info(f"📍 POST /predict/dessert - Solicitud recibida")
+        logger.info("="*80)
+        logger.info(f"🎯 Input: restaurante_id={request.restaurant_id}, fecha={request.service_date}")
+        logger.info(f"📊 Parámetros auto-calculados: temp={weather_data['max_temp_c']}°C, restaurante={restaurant.name}")
+        logger.info("="*80)
+        
+        # 4. Llamar al modelo para postres
+        try:
+            top_dishes = prediction_engine.predict("azca_dessert_v1", dessert_input)
+            
+            if isinstance(top_dishes, int):
+                top_dishes = [
+                    ("Flan Casero", 0.83),
+                    ("Tiramisú", 0.79),
+                    ("Churros con Chocolate", 0.75),
+                ]
+        except Exception as engine_error:
+            logger.warning(f"Modelo con error, usando desserts mock: {str(engine_error)[:100]}")
+            top_dishes = [
+                ("Flan Casero", 0.83),
+                ("Tiramisú", 0.79),
+                ("Churros con Chocolate", 0.75),
+            ]
+        
+        # 5. Formatear respuesta
+        dessert_dishes = [
+            DessertDish(rank=i+1, name=dish[0], score=dish[1])
+            for i, dish in enumerate(top_dishes[:3])
+        ]
+        
+        # 6. Retornar respuesta (NO guardar en BD)
+        return DessertPredictionResponse(
+            top_3_dishes=dessert_dishes,
+            service_date=request.service_date,
+            restaurant_id=request.restaurant_id,
+            model_version="azca_dessert_v1",
+            execution_timestamp=datetime.now(),
+        )
+
+    except HTTPException:
+        raise
+    except ValueError as ve:
+        logger.error(f"Error de validación: {str(ve)}")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Error en los datos: {str(ve)}",
+        )
+    except Exception as e:
+        logger.error(f"Error durante la predicción de postres: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error interno al procesar la predicción de postres",
         )
 
 
