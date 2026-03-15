@@ -13,18 +13,24 @@ Endpoints:
 
 import json
 import logging
+import os
 from datetime import datetime, date, timedelta
 from pathlib import Path
 
 import holidays
 import requests
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, func, distinct
+from sqlalchemy import desc, func
 from pydantic import BaseModel, Field
 
-from ..db import get_db, init_db, PredictionLog, Restaurant, FactServices, MenusAzca, SessionLocal
+from ..db import get_db, init_db, PredictionLog, Restaurant, FactServices, SessionLocal, DimDish
+from ..core.menu_intelligence import (
+    DocumentIntelligenceOCR,
+    MenuMLPredictor,
+    MenuSectionExtractor,
+)
 
 # Importar PredictionEngine - pero con fallback si falta
 try:
@@ -433,6 +439,57 @@ class DessertPredictionResponse(BaseModel):
     restaurant_id: int = Field(..., description="ID del restaurante", example=1)
     model_version: str = Field(..., description="Versión del modelo", example="azca_menu_dessert_v2")
     execution_timestamp: datetime = Field(..., description="Timestamp de ejecución", example="2026-03-14T10:30:00")
+
+
+class OCRExtractedMenu(BaseModel):
+    """
+    Resultado de extracción OCR del menú subido.
+    """
+
+    starter: str = Field(..., description="Entrante detectado por OCR", example="Ensalada César")
+    main: str = Field(..., description="Principal detectado por OCR", example="Merluza a la Gallega")
+    dessert: str = Field(..., description="Postre detectado por OCR", example="Flan Casero")
+    starter_options: list[str] = Field(default_factory=list, description="Todos los entrantes detectados")
+    main_options: list[str] = Field(default_factory=list, description="Todos los principales detectados")
+    dessert_options: list[str] = Field(default_factory=list, description="Todos los postres detectados")
+    detected_lines: list[str] = Field(default_factory=list, description="Líneas útiles detectadas por OCR")
+
+
+class OCRPredictedDish(BaseModel):
+    """
+    Plato predicho por el modelo para una categoría.
+    """
+
+    rank: int = Field(..., description="Ranking (1=top)", example=1)
+    name: str = Field(..., description="Nombre del plato", example="Merluza a la Gallega")
+    score: float = Field(..., description="Probabilidad estimada (0-1)", example=0.82)
+
+
+class MenuUploadPredictionResponse(BaseModel):
+    """
+    Respuesta combinada OCR + predicción ML del menú subido.
+    """
+
+    restaurant_id: int = Field(..., description="ID del restaurante", example=1)
+    service_date: date = Field(..., description="Fecha del servicio", example="2026-03-15")
+    ocr_provider: str = Field(..., description="Proveedor OCR usado", example="azure_document_intelligence")
+    extracted_menu: OCRExtractedMenu = Field(..., description="Platos detectados desde el menú")
+    starter_prediction: list[OCRPredictedDish] = Field(..., description="Top 3 entrantes predichos")
+    main_prediction: list[OCRPredictedDish] = Field(..., description="Top 3 principales predichos")
+    dessert_prediction: list[OCRPredictedDish] = Field(..., description="Top 3 postres predichos")
+    model_version: str = Field(..., description="Versión del stack de modelos", example="azca_menu_v2")
+    execution_timestamp: datetime = Field(..., description="Timestamp de ejecución")
+
+
+class MenuOCRSectionsResponse(BaseModel):
+    """
+    Respuesta OCR pura (sin predicción) para inspeccionar secciones detectadas.
+    """
+
+    ocr_provider: str = Field(..., description="Proveedor OCR usado", example="azure_document_intelligence")
+    extracted_menu: OCRExtractedMenu = Field(..., description="Platos detectados desde el menú")
+    raw_text: str = Field(..., description="Texto OCR completo para depuración")
+    execution_timestamp: datetime = Field(..., description="Timestamp de ejecución")
 
 
 class HealthResponse(BaseModel):
@@ -860,74 +917,162 @@ def calculate_calendar_features(service_date: date) -> dict:
     }
 
 
-# ============================================================================
-# FUNCIONES HELPER PARA CONTAR PLATOS ÚNICOS POR RESTAURANTE
-# ============================================================================
-
-def get_total_starters(db: Session, restaurant_id: int) -> int:
+def extract_menu_text_with_default_ocr(file_bytes: bytes, content_type: str | None = None) -> tuple[str, str]:
     """
-    Cuenta el total de PLATOS ÚNICOS de entrada (first_course) que tiene un restaurante en Menus_Azca.
-    
-    Args:
-        db: Sesión SQLAlchemy
-        restaurant_id: ID del restaurante
-    
-    Returns:
-        Total de platos de entrada únicos (int). Si no hay datos, retorna 1 para evitar división por 0.
+    Extrae texto del documento usando Azure Document Intelligence por defecto.
+
+    Variables de entorno requeridas:
+    - AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT
+    - AZURE_DOCUMENT_INTELLIGENCE_KEY
+    - AZURE_DOCUMENT_INTELLIGENCE_MODEL_ID (opcional, default prebuilt-layout)
+    """
+    endpoint = os.getenv("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT", "").strip()
+    key = os.getenv("AZURE_DOCUMENT_INTELLIGENCE_KEY", "").strip()
+    model_id = os.getenv("AZURE_DOCUMENT_INTELLIGENCE_MODEL_ID", "prebuilt-layout").strip()
+
+    if not endpoint or not key:
+        raise RuntimeError(
+            "Faltan AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT o AZURE_DOCUMENT_INTELLIGENCE_KEY."
+        )
+
+    ocr = DocumentIntelligenceOCR(endpoint=endpoint, key=key, model_id=model_id)
+    extracted_text = ocr.extract_text(file_bytes=file_bytes, content_type=content_type)
+
+    if not extracted_text:
+        raise RuntimeError("Document Intelligence no devolvió texto extraíble.")
+
+    return extracted_text, "azure_document_intelligence"
+
+
+def to_ranked_dishes(items: list[tuple[str, float]]) -> list[OCRPredictedDish]:
+    """Convierte lista [(name, score)] en objetos tipados con ranking."""
+    return [
+        OCRPredictedDish(rank=index + 1, name=name, score=float(score))
+        for index, (name, score) in enumerate(items[:3])
+    ]
+
+
+def build_extracted_menu(sections) -> OCRExtractedMenu:
+    """Convierte la salida del extractor en el modelo de respuesta estándar."""
+    return OCRExtractedMenu(
+        starter=sections.starter,
+        main=sections.main,
+        dessert=sections.dessert,
+        starter_options=sections.starter_options,
+        main_options=sections.main_options,
+        dessert_options=sections.dessert_options,
+        detected_lines=sections.detected_lines,
+    )
+
+
+def persist_extracted_dishes(db: Session, sections) -> int:
+    """
+    Persiste los platos extraídos por OCR en dim_dishes.
+
+    course_type usa los valores: first_course, second_course, dessert.
+    """
+    grouped_dishes = {
+        "first_course": sections.starter_options,
+        "second_course": sections.main_options,
+        "dessert": sections.dessert_options,
+    }
+
+    inserted = 0
+    seen: set[tuple[str, str]] = set()
+
+    try:
+        for course_type, dishes in grouped_dishes.items():
+            for dish_name in dishes:
+                normalized_name = (dish_name or "").strip()
+                if not normalized_name:
+                    continue
+
+                dedupe_key = (course_type, normalized_name.casefold())
+                if dedupe_key in seen:
+                    continue
+                seen.add(dedupe_key)
+
+                existing = (
+                    db.query(DimDish.dish_id)
+                    .filter(
+                        DimDish.course_type == course_type,
+                        func.lower(DimDish.dish_name) == normalized_name.lower(),
+                    )
+                    .first()
+                )
+                if existing:
+                    continue
+
+                db.add(DimDish(course_type=course_type, dish_name=normalized_name))
+                inserted += 1
+
+        if inserted > 0:
+            db.commit()
+        else:
+            db.flush()
+
+        return inserted
+
+    except Exception:
+        db.rollback()
+        raise
+
+
+@app.post(
+    "/ocr/menu-sections",
+    response_model=MenuOCRSectionsResponse,
+    summary="Subir menú y ver solo detección OCR por secciones",
+    tags=["Predictions"],
+    status_code=status.HTTP_200_OK,
+)
+async def extract_menu_sections_ocr_only(
+    menu_file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """
+    Flujo OCR puro (sin predicción ML):
+    1) OCR con Azure Document Intelligence.
+    2) Parser para detectar entrante, principal y postre.
+
+    Request multipart/form-data:
+    - menu_file: archivo (PDF/JPG/PNG, etc.)
     """
     try:
-        total = db.query(func.count(distinct(MenusAzca.first_course))).filter(
-            MenusAzca.restaurant_id == restaurant_id,
-            MenusAzca.first_course.isnot(None)
-        ).scalar()
-        return max(total or 1, 1)  # Mínimo 1 para evitar división por 0
-    except Exception as e:
-        logger.warning(f"Error contando starters únicos para restaurante {restaurant_id}: {str(e)}")
-        return 1
+        file_bytes = await menu_file.read()
+        if not file_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El archivo de menú está vacío.",
+            )
 
+        raw_text, ocr_provider = extract_menu_text_with_default_ocr(
+            file_bytes=file_bytes,
+            content_type=menu_file.content_type,
+        )
+        sections = MenuSectionExtractor.extract(raw_text)
+        persist_extracted_dishes(db, sections)
 
-def get_total_mains(db: Session, restaurant_id: int) -> int:
-    """
-    Cuenta el total de PLATOS ÚNICOS principales (second_course) que tiene un restaurante en Menus_Azca.
-    
-    Args:
-        db: Sesión SQLAlchemy
-        restaurant_id: ID del restaurante
-    
-    Returns:
-        Total de platos principales únicos (int). Si no hay datos, retorna 1 para evitar división por 0.
-    """
-    try:
-        total = db.query(func.count(distinct(MenusAzca.second_course))).filter(
-            MenusAzca.restaurant_id == restaurant_id,
-            MenusAzca.second_course.isnot(None)
-        ).scalar()
-        return max(total or 1, 1)  # Mínimo 1 para evitar división por 0
-    except Exception as e:
-        logger.warning(f"Error contando mains únicos para restaurante {restaurant_id}: {str(e)}")
-        return 1
+        return MenuOCRSectionsResponse(
+            ocr_provider=ocr_provider,
+            extracted_menu=build_extracted_menu(sections),
+            raw_text=raw_text,
+            execution_timestamp=datetime.now(),
+        )
 
-
-def get_total_desserts(db: Session, restaurant_id: int) -> int:
-    """
-    Cuenta el total de POSTRES ÚNICOS (dessert) que tiene un restaurante en Menus_Azca.
-    
-    Args:
-        db: Sesión SQLAlchemy
-        restaurant_id: ID del restaurante
-    
-    Returns:
-        Total de postres únicos (int). Si no hay datos, retorna 1 para evitar división por 0.
-    """
-    try:
-        total = db.query(func.count(distinct(MenusAzca.dessert))).filter(
-            MenusAzca.restaurant_id == restaurant_id,
-            MenusAzca.dessert.isnot(None)
-        ).scalar()
-        return max(total or 1, 1)  # Mínimo 1 para evitar división por 0
-    except Exception as e:
-        logger.warning(f"Error contando desserts únicos para restaurante {restaurant_id}: {str(e)}")
-        return 1
+    except HTTPException:
+        raise
+    except RuntimeError as runtime_error:
+        logger.error(f"OCR no disponible: {runtime_error}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(runtime_error),
+        )
+    except Exception as exc:
+        logger.error(f"Error en /ocr/menu-sections: {exc}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error interno al procesar OCR del menú.",
+        )
 
 
 @app.post(
@@ -1495,6 +1640,111 @@ async def predict_dessert(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error interno al procesar la predicción de postres",
+        )
+
+
+@app.post(
+    "/predict/menu-upload",
+    response_model=MenuUploadPredictionResponse,
+    summary="Subir menú (OCR) y predecir platos",
+    tags=["Predictions"],
+    status_code=status.HTTP_201_CREATED,
+)
+async def predict_from_menu_upload(
+    restaurant_id: int = Form(...),
+    service_date: date = Form(...),
+    menu_file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """
+    Flujo por defecto:
+    1) OCR con Azure Document Intelligence para extraer el menú subido.
+    2) Parser para detectar entrante, principal y postre.
+    3) Predicción ML top-3 por categoría en base al menú detectado.
+
+    Request multipart/form-data:
+    - restaurant_id: int
+    - service_date: YYYY-MM-DD
+    - menu_file: archivo (PDF/JPG/PNG, etc.)
+    """
+    global prediction_engine
+
+    if prediction_engine is None:
+        logger.error("Motor de predicción no inicializado")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Motor de predicción no disponible. Reinicia la API.",
+        )
+
+    restaurant = db.query(Restaurant).filter(Restaurant.restaurant_id == restaurant_id).first()
+    if not restaurant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Restaurante con ID {restaurant_id} no encontrado",
+        )
+
+    try:
+        file_bytes = await menu_file.read()
+        if not file_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El archivo de menú está vacío.",
+            )
+
+        # OCR por defecto con Azure Document Intelligence
+        raw_text, ocr_provider = extract_menu_text_with_default_ocr(
+            file_bytes=file_bytes,
+            content_type=menu_file.content_type,
+        )
+
+        # Detección de secciones del menú
+        sections = MenuSectionExtractor.extract(raw_text)
+        persist_extracted_dishes(db, sections)
+
+        # Variables contextuales automáticas (similares al flujo actual)
+        weather_data = get_weather_data(service_date)
+        calendar_features = calculate_calendar_features(service_date)
+
+        model_input_common = {
+            "max_temp_c": weather_data["max_temp_c"],
+            "is_holiday": calendar_features["is_holiday"],
+            "is_bridge_day": calendar_features["is_bridge_day"],
+            "is_business_day": calendar_features["is_business_day"],
+            "cuisine_type": restaurant.cuisine_type,
+            "restaurant_segment": restaurant.restaurant_segment,
+            "menu_price": restaurant.menu_price or 15.0,
+            "day_of_week": service_date.weekday(),
+            "month": service_date.month,
+        }
+
+        menu_predictor = MenuMLPredictor(prediction_engine.model_provider)
+        predictions = menu_predictor.predict_from_menu(model_input_common, sections)
+
+        return MenuUploadPredictionResponse(
+            restaurant_id=restaurant_id,
+            service_date=service_date,
+            ocr_provider=ocr_provider,
+            extracted_menu=build_extracted_menu(sections),
+            starter_prediction=to_ranked_dishes(predictions["starter"]),
+            main_prediction=to_ranked_dishes(predictions["main"]),
+            dessert_prediction=to_ranked_dishes(predictions["dessert"]),
+            model_version="azca_menu_v2",
+            execution_timestamp=datetime.now(),
+        )
+
+    except HTTPException:
+        raise
+    except RuntimeError as runtime_error:
+        logger.error(f"OCR no disponible: {runtime_error}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(runtime_error),
+        )
+    except Exception as exc:
+        logger.error(f"Error en /predict/menu-upload: {exc}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error interno al procesar OCR y predicción del menú.",
         )
 
 

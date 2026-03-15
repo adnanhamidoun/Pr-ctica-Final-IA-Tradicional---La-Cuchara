@@ -42,6 +42,23 @@ class Restaurant(Base):
         return f"<Restaurant(id={self.restaurant_id}, name='{self.name}')>"
 
 
+class DimDish(Base):
+    """
+    Modelo ORM para la tabla dim_dishes.
+
+    Almacena platos normalizados extraídos por OCR y su tipo de curso.
+    """
+
+    __tablename__ = "dim_dishes"
+
+    dish_id = Column(Integer, primary_key=True, autoincrement=True)
+    course_type = Column(String(50), nullable=False)
+    dish_name = Column(String(500), nullable=False)
+
+    def __repr__(self):
+        return f"<DimDish(id={self.dish_id}, course_type='{self.course_type}', dish_name='{self.dish_name}')>"
+
+
 class PredictionLog(Base):
     """
     Modelo ORM para la tabla PredictionLogs de auditoría.
