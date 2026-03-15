@@ -836,6 +836,21 @@ class CacheManager:
         }
 
 
+def _ensure_auth_columns_exist() -> None:
+    """Crea columnas de auth/imagen en las tablas si la BD aún no fue migrada. Idempotente."""
+    statements = [
+        "IF COL_LENGTH('dbo.dim_restaurants', 'login_email') IS NULL ALTER TABLE dbo.dim_restaurants ADD login_email NVARCHAR(255) NULL;",
+        "IF COL_LENGTH('dbo.dim_restaurants', 'password_hash') IS NULL ALTER TABLE dbo.dim_restaurants ADD password_hash NVARCHAR(255) NULL;",
+        "IF COL_LENGTH('dbo.dim_restaurants', 'image_url') IS NULL ALTER TABLE dbo.dim_restaurants ADD image_url NVARCHAR(500) NULL;",
+        "IF COL_LENGTH('dbo.inscripciones', 'login_email') IS NULL ALTER TABLE dbo.inscripciones ADD login_email NVARCHAR(255) NULL;",
+        "IF COL_LENGTH('dbo.inscripciones', 'password_hash') IS NULL ALTER TABLE dbo.inscripciones ADD password_hash NVARCHAR(255) NULL;",
+        "IF COL_LENGTH('dbo.inscripciones', 'image_url') IS NULL ALTER TABLE dbo.inscripciones ADD image_url NVARCHAR(500) NULL;",
+    ]
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+
+
 # ============================================================================
 # LIFESPAN - Cargar modelo una sola vez al iniciar la aplicación
 # ============================================================================
@@ -870,7 +885,14 @@ async def lifespan(app: FastAPI):
     except Exception as db_error:
         logger.error(f"❌ Error inicializando BD: {str(db_error)}", exc_info=True)
         raise
-    
+
+    # 1b. Asegurar que las columnas de auth/imagen existen (idempotente)
+    try:
+        _ensure_auth_columns_exist()
+        logger.info("✅ Columnas de auth/imagen verificadas")
+    except Exception as migration_error:
+        logger.warning(f"⚠️  No se pudieron verificar columnas de auth: {str(migration_error)[:120]}")
+
     # 2. Intentar conectar a BD y verificar restaurantes
     try:
         db = SessionLocal()
