@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import TestMode from './TestMode'
 
 function App() {
   const [mode, setMode] = useState('user')
   const [restaurants, setRestaurants] = useState([])
+  const [restaurantsLoading, setRestaurantsLoading] = useState(true)
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
@@ -20,6 +21,9 @@ function App() {
   const [mainLoading, setMainLoading] = useState(false)
   const [dessertResult, setDessertResult] = useState(null)
   const [dessertLoading, setDessertLoading] = useState(false)
+  const [menuFile, setMenuFile] = useState(null)
+  const [menuUploadLoading, setMenuUploadLoading] = useState(false)
+  const [menuUploadResult, setMenuUploadResult] = useState(null)
   
   // Campos de predicción (cargados automáticamente desde BD)
   const [capacityLimit, setCapacityLimit] = useState('')
@@ -40,18 +44,25 @@ function App() {
     fetchRestaurants()
   }, [])
 
-  // Limpiar resultados cuando cambien los parámetros de entrada
   useEffect(() => {
-    console.log("🔄 Parámetros cambiados - Limpiando resultados anteriores")
     setResult(null)
     setStarterResult(null)
     setMainResult(null)
     setDessertResult(null)
+    setMenuUploadResult(null)
+    setExecutionTime(null)
     setError(null)
   }, [restaurantId, serviceDate])
 
+  useEffect(() => {
+    if (restaurantId) {
+      fetchRestaurantDetail(restaurantId)
+    }
+  }, [restaurantId])
+
   const fetchRestaurants = async () => {
     console.log("📍 fetchRestaurants() iniciado")
+    setRestaurantsLoading(true)
     try {
       console.log("🌐 Llamando a GET /restaurants...")
       const response = await fetch('/restaurants')
@@ -63,20 +74,21 @@ function App() {
       }
       
       const data = await response.json()
+      const restaurantList = Array.isArray(data?.restaurants) ? data.restaurants : []
       console.log(`✅ Data recibida:`, data)
-      console.log(`📦 Restaurantes: ${data.count} encontrados`)
+      console.log(`📦 Restaurantes: ${restaurantList.length} encontrados`)
       
-      setRestaurants(data.restaurants)
-      if (data.restaurants.length > 0) {
-        const firstId = data.restaurants[0].restaurant_id.toString()
+      setRestaurants(restaurantList)
+      if (restaurantList.length > 0) {
+        const firstId = restaurantList[0].restaurant_id.toString()
         setRestaurantId(firstId)
-        console.log(`✨ Primer restaurante seleccionado: ${data.restaurants[0].name}`)
-        // Cargar detalles del primer restaurante
-        fetchRestaurantDetail(firstId)
+        console.log(`✨ Primer restaurante seleccionado: ${restaurantList[0].name}`)
       }
     } catch (err) {
       console.error("❌ Error al cargar restaurantes:", err)
       setError(err.message)
+    } finally {
+      setRestaurantsLoading(false)
     }
   }
 
@@ -121,9 +133,6 @@ function App() {
   const handleRestaurantChange = (e) => {
     const id = e.target.value
     setRestaurantId(id)
-    if (id) {
-      fetchRestaurantDetail(id)
-    }
   }
 
   const handleSubmit = async (e) => {
@@ -304,6 +313,61 @@ function App() {
     }
   }
 
+  const handlePredictMenuUpload = async (e) => {
+    e.preventDefault()
+
+    if (!restaurantId) {
+      setError("Por favor selecciona un restaurante")
+      return
+    }
+
+    if (!menuFile) {
+      setError("Sube un archivo de menú antes de predecir")
+      return
+    }
+
+    setMenuUploadLoading(true)
+    setError(null)
+    setResult(null)
+    setStarterResult(null)
+    setMainResult(null)
+    setDessertResult(null)
+    setExecutionTime(null)
+    setMenuUploadResult(null)
+
+    try {
+      const formData = new FormData()
+      formData.append('menu_file', menuFile)
+
+      console.log("📄 Subiendo menú para OCR (solo extracción)...")
+
+      const response = await fetch('/ocr/menu-sections', {
+        method: 'POST',
+        body: formData
+      })
+
+      if (!response.ok) {
+        let message = `HTTP error: ${response.status}`
+        try {
+          const payload = await response.json()
+          if (payload?.detail) message = payload.detail
+        } catch {
+          // no-op
+        }
+        throw new Error(message)
+      }
+
+      const data = await response.json()
+      console.log("✅ Menú extraído por OCR:", data)
+      setMenuUploadResult(data)
+    } catch (err) {
+      console.error("❌ Error en OCR del menú:", err)
+      setError(err.message)
+    } finally {
+      setMenuUploadLoading(false)
+    }
+  }
+
   if (mode === 'test') {
     return <TestMode onBack={() => setMode('user')} />
   }
@@ -345,11 +409,11 @@ function App() {
                   <select
                     value={restaurantId}
                     onChange={handleRestaurantChange}
-                    disabled={loading || restaurants.length === 0}
+                    disabled={loading || restaurantsLoading}
                     className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-slate-800/50 border border-blue-400/50 rounded-lg text-white focus:outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-500/30 placeholder-slate-400 transition-all duration-200 disabled:opacity-50 text-sm sm:text-base"
                   >
                     <option value="">
-                      {restaurants.length === 0 ? 'Cargando restaurantes...' : 'Elige un restaurante'}
+                      {restaurantsLoading ? 'Cargando restaurantes...' : restaurants.length === 0 ? 'No hay restaurantes disponibles' : 'Elige un restaurante'}
                     </option>
                     {restaurants.map((r) => (
                       <option key={r.restaurant_id} value={r.restaurant_id.toString()}>
@@ -415,6 +479,45 @@ function App() {
                       </span>
                     </label>
                   </div>
+                </div>
+
+                {/* Menú OCR */}
+                <div className="bg-gradient-to-br from-fuchsia-500/20 to-violet-500/20 border border-fuchsia-500/30 backdrop-blur-sm rounded-xl p-4 sm:p-6">
+                  <label className="block text-sm sm:text-base font-semibold text-fuchsia-200 mb-3">
+                    📄 Menú (OCR Document Intelligence)
+                  </label>
+
+                  <input
+                    type="file"
+                    accept=".pdf,.png,.jpg,.jpeg,.webp"
+                    onChange={(e) => {
+                      const selected = e.target.files && e.target.files[0] ? e.target.files[0] : null
+                      setMenuFile(selected)
+                    }}
+                    disabled={menuUploadLoading}
+                    className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-slate-800/50 border border-fuchsia-400/50 rounded-lg text-white file:mr-3 file:px-3 file:py-1 file:rounded-md file:border-0 file:bg-fuchsia-600 file:text-white focus:outline-none focus:border-fuchsia-300 focus:ring-2 focus:ring-fuchsia-500/30 transition-all duration-200 disabled:opacity-50 text-sm sm:text-base"
+                  />
+
+                  <p className="text-fuchsia-300/70 text-xs mt-2">
+                    Sube PDF o imagen del menú para ver qué detecta como entrante, principal y postre.
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={handlePredictMenuUpload}
+                    disabled={menuUploadLoading || !menuFile}
+                    className="mt-4 w-full py-2 sm:py-3 bg-gradient-to-r from-fuchsia-600 via-violet-600 to-indigo-600 hover:from-fuchsia-500 hover:via-violet-500 hover:to-indigo-500 text-white font-bold text-xs sm:text-base rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1 sm:gap-2"
+                  >
+                    {menuUploadLoading ? (
+                      <span className="animate-spin text-sm sm:text-base">⏳</span>
+                    ) : (
+                      <>
+                        <span className="text-sm sm:text-lg">🧠</span>
+                        <span className="hidden sm:inline">OCR Secciones</span>
+                        <span className="sm:hidden text-xs">OCR</span>
+                      </>
+                    )}
+                  </button>
                 </div>
 
                 {/* Botones */}
@@ -679,8 +782,79 @@ function App() {
                 </div>
               ) : null}
 
+              {/* Resultado OCR + Menú */}
+              {menuUploadResult ? (
+                <div className="bg-gradient-to-br from-fuchsia-500/20 to-violet-500/20 border border-fuchsia-500/50 backdrop-blur-sm rounded-xl p-4 sm:p-8">
+                  <div className="text-center mb-6 sm:mb-8">
+                    <p className="text-fuchsia-300/70 text-xs sm:text-sm font-semibold uppercase tracking-wide mb-2 sm:mb-3">
+                      OCR Menú
+                    </p>
+                    <p className="text-fuchsia-300 text-sm sm:text-base">Detección visual por secciones</p>
+                  </div>
+
+                  <div className="space-y-2 text-xs sm:text-sm mb-5 pb-4 border-b border-fuchsia-500/30">
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="text-fuchsia-300/70">OCR</span>
+                      <span className="text-fuchsia-200 font-mono text-right">{menuUploadResult.ocr_provider}</span>
+                    </div>
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="text-fuchsia-300/70">Entrante detectado</span>
+                      <span className="text-fuchsia-200 text-right">{menuUploadResult.extracted_menu?.starter}</span>
+                    </div>
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="text-fuchsia-300/70">Principal detectado</span>
+                      <span className="text-fuchsia-200 text-right">{menuUploadResult.extracted_menu?.main}</span>
+                    </div>
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="text-fuchsia-300/70">Postre detectado</span>
+                      <span className="text-fuchsia-200 text-right">{menuUploadResult.extracted_menu?.dessert}</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4 mb-5 pb-4 border-b border-fuchsia-500/30">
+                    {[
+                      {
+                        title: 'Opciones OCR de entrantes',
+                        items: menuUploadResult.extracted_menu?.starter_options,
+                      },
+                      {
+                        title: 'Opciones OCR de principales',
+                        items: menuUploadResult.extracted_menu?.main_options,
+                      },
+                      {
+                        title: 'Opciones OCR de postres',
+                        items: menuUploadResult.extracted_menu?.dessert_options,
+                      },
+                    ].map((group) => (
+                      <div key={group.title} className="bg-fuchsia-950/20 rounded-lg border border-fuchsia-500/20 p-3 sm:p-4">
+                        <p className="text-fuchsia-200 font-semibold text-xs sm:text-sm mb-2">{group.title}</p>
+                        {group.items?.length ? (
+                          <div className="space-y-1">
+                            {group.items.map((item, index) => (
+                              <div key={`${group.title}-${index}-${item}`} className="text-fuchsia-100 text-xs sm:text-sm flex items-start gap-2">
+                                <span className="text-fuchsia-300 leading-5">•</span>
+                                <span>{item}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-fuchsia-300/70 text-xs sm:text-sm">Sin líneas detectadas para este bloque</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="space-y-2 sm:space-y-3 border-t border-fuchsia-500/30 pt-3 sm:pt-4 text-xs sm:text-sm mt-4 sm:mt-6">
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="text-fuchsia-300/70">Ejecución</span>
+                      <span className="text-fuchsia-200 font-mono text-right">{menuUploadResult.execution_timestamp || '-'}</span>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
               {/* Placeholder */}
-              {!result && !starterResult && !mainResult && !dessertResult && (
+              {!result && !starterResult && !mainResult && !dessertResult && !menuUploadResult && (
                 <div className="bg-gradient-to-br from-slate-700/50 to-slate-600/50 border border-slate-500/30 backdrop-blur-sm rounded-xl p-4 sm:p-8 text-center">
                   <p className="text-slate-400 text-xs sm:text-sm">💡 Completa el formulario</p>
                   <p className="text-slate-400 text-xs sm:text-sm">y presiona cualquiera de los botones</p>

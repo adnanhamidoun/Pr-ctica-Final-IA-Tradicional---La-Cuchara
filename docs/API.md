@@ -153,6 +153,56 @@ Generate a demand prediction for a restaurant on a specific date.
 
 ---
 
+### 5. Upload Menu (OCR) + Predict Dishes
+
+**POST** `/predict/menu-upload`
+
+Sube un menú en archivo (PDF/imagen), extrae automáticamente `entrante/principal/postre` con Azure Document Intelligence y devuelve top-3 predicciones por categoría.
+
+**Request (multipart/form-data):**
+- `restaurant_id` (integer)
+- `service_date` (string, YYYY-MM-DD)
+- `menu_file` (file)
+
+**Required environment variables (backend):**
+- `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT`
+- `AZURE_DOCUMENT_INTELLIGENCE_KEY`
+- `AZURE_DOCUMENT_INTELLIGENCE_MODEL_ID` (optional, default: `prebuilt-layout`)
+
+**Response (201 Created):**
+```json
+{
+  "restaurant_id": 1,
+  "service_date": "2026-03-15",
+  "ocr_provider": "azure_document_intelligence",
+  "extracted_menu": {
+    "starter": "Ensalada César",
+    "main": "Merluza a la Gallega",
+    "dessert": "Flan Casero"
+  },
+  "starter_prediction": [
+    {"rank": 1, "name": "Ensalada César", "score": 0.91}
+  ],
+  "main_prediction": [
+    {"rank": 1, "name": "Merluza a la Gallega", "score": 0.88}
+  ],
+  "dessert_prediction": [
+    {"rank": 1, "name": "Flan Casero", "score": 0.85}
+  ],
+  "model_version": "azca_menu_v2",
+  "execution_timestamp": "2026-03-14T10:30:00"
+}
+```
+
+**Error Response (503 Service Unavailable):**
+```json
+{
+  "detail": "Faltan AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT o AZURE_DOCUMENT_INTELLIGENCE_KEY."
+}
+```
+
+---
+
 ## Data Flow Diagram
 
 ```

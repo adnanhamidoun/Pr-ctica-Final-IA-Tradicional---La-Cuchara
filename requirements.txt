@@ -22,7 +22,6 @@ azureml-train-core==1.62.0
 azureml-dataprep==5.4.3
 azureml-mlflow==1.62.0
 mlflow-skinny==3.9.0
-azure-ai-documentintelligence==1.0.2
 
 # ============= DATABASE & SQL =============
 SQLAlchemy==2.0.48
@@ -33,7 +32,6 @@ fastapi==0.135.1
 uvicorn==0.41.0
 pydantic==2.12.5
 starlette==0.52.1
-python-multipart==0.0.20
 
 # ============= HTTP CLIENT =============
 requests==2.32.5

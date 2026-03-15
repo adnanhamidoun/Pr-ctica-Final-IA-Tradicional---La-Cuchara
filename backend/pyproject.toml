@@ -23,9 +23,11 @@ dependencies = [
     "azureml-core==1.61.0.post1",
     "azureml-train-automl-client==1.62.0",
     "azureml-train-automl-runtime==1.62.0",
+    "azure-ai-documentintelligence==1.0.2",
     "fastapi==0.135.1",
     "uvicorn==0.41.0",
     "pydantic==2.12.5",
+    "python-multipart==0.0.20",
     "python-dateutil==2.9.0.post0",
     "PyYAML==6.0.3",
 ]
