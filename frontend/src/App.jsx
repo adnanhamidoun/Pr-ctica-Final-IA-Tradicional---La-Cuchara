@@ -149,54 +149,6 @@ function App() {
     setExecutionTime(null)
 
     const startTime = performance.now()
-  
-  const handlePredictMenuUpload = async (e) => {
-    e.preventDefault()
-
-    if (!restaurantId) {
-      setError("Por favor selecciona un restaurante")
-      return
-    }
-
-    if (!menuFile) {
-      setError("Sube un archivo de menú antes de predecir")
-      return
-    }
-
-    setMenuUploadLoading(true)
-    setError(null)
-    setMenuUploadResult(null)
-
-    try {
-      const formData = new FormData()
-      formData.append('restaurant_id', restaurantId)
-      formData.append('service_date', serviceDate)
-      formData.append('menu_file', menuFile)
-
-      const response = await fetch('/predict/menu-upload', {
-        method: 'POST',
-        body: formData,
-      })
-
-      if (!response.ok) {
-        let message = `HTTP error: ${response.status}`
-        try {
-          const payload = await response.json()
-          if (payload?.detail) message = payload.detail
-        } catch {
-          // no-op
-        }
-        throw new Error(message)
-      }
-
-      const data = await response.json()
-      setMenuUploadResult(data)
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setMenuUploadLoading(false)
-    }
-  }
 
     try {
       // Datos de predicción: solo restaurante y fecha
@@ -376,17 +328,20 @@ function App() {
 
     setMenuUploadLoading(true)
     setError(null)
+    setResult(null)
+    setStarterResult(null)
+    setMainResult(null)
+    setDessertResult(null)
+    setExecutionTime(null)
     setMenuUploadResult(null)
 
     try {
       const formData = new FormData()
-      formData.append('restaurant_id', restaurantId)
-      formData.append('service_date', serviceDate)
       formData.append('menu_file', menuFile)
 
-      console.log("📄 Subiendo menú para OCR + predicción...")
+      console.log("📄 Subiendo menú para OCR (solo extracción)...")
 
-      const response = await fetch('/predict/menu-upload', {
+      const response = await fetch('/ocr/menu-sections', {
         method: 'POST',
         body: formData
       })
@@ -403,10 +358,10 @@ function App() {
       }
 
       const data = await response.json()
-      console.log("✅ Menú procesado:", data)
+      console.log("✅ Menú extraído por OCR:", data)
       setMenuUploadResult(data)
     } catch (err) {
-      console.error("❌ Error en OCR + predicción de menú:", err)
+      console.error("❌ Error en OCR del menú:", err)
       setError(err.message)
     } finally {
       setMenuUploadLoading(false)
@@ -544,13 +499,13 @@ function App() {
                   />
 
                   <p className="text-fuchsia-300/70 text-xs mt-2">
-                    Sube PDF o imagen del menú para extraer entrante, principal y postre.
+                    Sube PDF o imagen del menú para ver qué detecta como entrante, principal y postre.
                   </p>
 
                   <button
                     type="button"
                     onClick={handlePredictMenuUpload}
-                    disabled={menuUploadLoading || !restaurantId || !menuFile || restaurants.length === 0}
+                    disabled={menuUploadLoading || !menuFile}
                     className="mt-4 w-full py-2 sm:py-3 bg-gradient-to-r from-fuchsia-600 via-violet-600 to-indigo-600 hover:from-fuchsia-500 hover:via-violet-500 hover:to-indigo-500 text-white font-bold text-xs sm:text-base rounded-lg shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1 sm:gap-2"
                   >
                     {menuUploadLoading ? (
@@ -558,7 +513,7 @@ function App() {
                     ) : (
                       <>
                         <span className="text-sm sm:text-lg">🧠</span>
-                        <span className="hidden sm:inline">OCR + Menú</span>
+                        <span className="hidden sm:inline">OCR Secciones</span>
                         <span className="sm:hidden text-xs">OCR</span>
                       </>
                     )}
@@ -832,9 +787,9 @@ function App() {
                 <div className="bg-gradient-to-br from-fuchsia-500/20 to-violet-500/20 border border-fuchsia-500/50 backdrop-blur-sm rounded-xl p-4 sm:p-8">
                   <div className="text-center mb-6 sm:mb-8">
                     <p className="text-fuchsia-300/70 text-xs sm:text-sm font-semibold uppercase tracking-wide mb-2 sm:mb-3">
-                      OCR + Menú
+                      OCR Menú
                     </p>
-                    <p className="text-fuchsia-300 text-sm sm:text-base">Extracción automática de platos</p>
+                    <p className="text-fuchsia-300 text-sm sm:text-base">Detección visual por secciones</p>
                   </div>
 
                   <div className="space-y-2 text-xs sm:text-sm mb-5 pb-4 border-b border-fuchsia-500/30">
@@ -857,26 +812,28 @@ function App() {
                   </div>
 
                   <div className="space-y-4 mb-5 pb-4 border-b border-fuchsia-500/30">
-                    {[{
-                      title: 'Líneas OCR detectadas',
-                      items: menuUploadResult.extracted_menu?.detected_lines,
-                    }, {
-                      title: 'Opciones OCR de entrantes',
-                      items: menuUploadResult.extracted_menu?.starter_options,
-                    }, {
-                      title: 'Opciones OCR de principales',
-                      items: menuUploadResult.extracted_menu?.main_options,
-                    }, {
-                      title: 'Opciones OCR de postres',
-                      items: menuUploadResult.extracted_menu?.dessert_options,
-                    }].map((group) => (
+                    {[
+                      {
+                        title: 'Opciones OCR de entrantes',
+                        items: menuUploadResult.extracted_menu?.starter_options,
+                      },
+                      {
+                        title: 'Opciones OCR de principales',
+                        items: menuUploadResult.extracted_menu?.main_options,
+                      },
+                      {
+                        title: 'Opciones OCR de postres',
+                        items: menuUploadResult.extracted_menu?.dessert_options,
+                      },
+                    ].map((group) => (
                       <div key={group.title} className="bg-fuchsia-950/20 rounded-lg border border-fuchsia-500/20 p-3 sm:p-4">
                         <p className="text-fuchsia-200 font-semibold text-xs sm:text-sm mb-2">{group.title}</p>
                         {group.items?.length ? (
                           <div className="space-y-1">
                             {group.items.map((item, index) => (
-                              <div key={`${group.title}-${index}-${item}`} className="text-fuchsia-100 text-xs sm:text-sm">
-                                {item}
+                              <div key={`${group.title}-${index}-${item}`} className="text-fuchsia-100 text-xs sm:text-sm flex items-start gap-2">
+                                <span className="text-fuchsia-300 leading-5">•</span>
+                                <span>{item}</span>
                               </div>
                             ))}
                           </div>
@@ -889,8 +846,8 @@ function App() {
 
                   <div className="space-y-2 sm:space-y-3 border-t border-fuchsia-500/30 pt-3 sm:pt-4 text-xs sm:text-sm mt-4 sm:mt-6">
                     <div className="flex justify-between items-start gap-2">
-                      <span className="text-fuchsia-300/70">Fecha</span>
-                      <span className="text-fuchsia-200 font-mono">{menuUploadResult.service_date}</span>
+                      <span className="text-fuchsia-300/70">Ejecución</span>
+                      <span className="text-fuchsia-200 font-mono text-right">{menuUploadResult.execution_timestamp || '-'}</span>
                     </div>
                   </div>
                 </div>
