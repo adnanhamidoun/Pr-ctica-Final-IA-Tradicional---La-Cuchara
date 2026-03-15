@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
 from pydantic import BaseModel, Field
 
-from ..db import get_db, init_db, PredictionLog, Restaurant, FactServices, SessionLocal, DimDish
+from ..db import get_db, init_db, PredictionLog, Restaurant, FactServices, SessionLocal, DimDish, MenusAzca
 from ..core.menu_intelligence import (
     DocumentIntelligenceOCR,
     MenuMLPredictor,
@@ -915,6 +915,61 @@ def calculate_calendar_features(service_date: date) -> dict:
         'is_bridge_day': is_bridge_day,
         'is_payday_week': is_payday_week,
     }
+
+
+def _get_total_course_count(db: Session, restaurant_id: int, course_column, fallback: int = 30) -> int:
+    """
+    Calcula el total histórico de platos servidos por tipo de curso para un restaurante.
+
+    Prioridad:
+    1) Conteo en Menus_Azca del curso indicado (no nulo y no vacío).
+    2) avg_4_weeks más reciente en fact_services.
+    3) 70% de capacidad del restaurante.
+    4) Fallback fijo.
+    """
+    total = (
+        db.query(func.count())
+        .select_from(MenusAzca)
+        .filter(
+            MenusAzca.restaurant_id == restaurant_id,
+            course_column.isnot(None),
+            func.length(func.trim(course_column)) > 0,
+        )
+        .scalar()
+    )
+
+    if total and total > 0:
+        return int(total)
+
+    recent_record = (
+        db.query(FactServices)
+        .filter(FactServices.restaurant_id == restaurant_id)
+        .order_by(desc(FactServices.date_id))
+        .first()
+    )
+    if recent_record and recent_record.avg_4_weeks and recent_record.avg_4_weeks > 0:
+        return max(1, int(round(float(recent_record.avg_4_weeks))))
+
+    restaurant = db.query(Restaurant).filter(Restaurant.restaurant_id == restaurant_id).first()
+    if restaurant and restaurant.capacity_limit and restaurant.capacity_limit > 0:
+        return max(1, int(round(float(restaurant.capacity_limit) * 0.7)))
+
+    return fallback
+
+
+def get_total_starters(db: Session, restaurant_id: int) -> int:
+    """Obtiene total histórico de entrantes para estimar counts por score."""
+    return _get_total_course_count(db, restaurant_id, MenusAzca.first_course)
+
+
+def get_total_mains(db: Session, restaurant_id: int) -> int:
+    """Obtiene total histórico de platos principales para estimar counts por score."""
+    return _get_total_course_count(db, restaurant_id, MenusAzca.second_course)
+
+
+def get_total_desserts(db: Session, restaurant_id: int) -> int:
+    """Obtiene total histórico de postres para estimar counts por score."""
+    return _get_total_course_count(db, restaurant_id, MenusAzca.dessert)
 
 
 def extract_menu_text_with_default_ocr(file_bytes: bytes, content_type: str | None = None) -> tuple[str, str]:
