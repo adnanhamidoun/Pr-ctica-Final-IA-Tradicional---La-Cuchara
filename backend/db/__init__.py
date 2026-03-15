@@ -5,7 +5,7 @@ Exporta los componentes principales para la integración con FastAPI.
 """
 
 from .database import engine, SessionLocal, Base, get_db, init_db
-from .models import PredictionLog, Restaurant, FactServices
+from .models import PredictionLog, Restaurant, FactServices, DimDish
 
 __all__ = [
     "engine",
@@ -16,4 +16,5 @@ __all__ = [
     "PredictionLog",
     "Restaurant",
     "FactServices",
+    "DimDish",
 ]

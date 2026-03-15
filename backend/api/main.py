@@ -22,10 +22,10 @@ import requests
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from pydantic import BaseModel, Field
 
-from db import get_db, init_db, PredictionLog, Restaurant, FactServices, SessionLocal
+from ..db import get_db, init_db, PredictionLog, Restaurant, FactServices, SessionLocal, DimDish
 from ..core.menu_intelligence import (
     DocumentIntelligenceOCR,
     MenuMLPredictor,
@@ -473,6 +473,17 @@ class MenuUploadPredictionResponse(BaseModel):
     main_prediction: list[OCRPredictedDish] = Field(..., description="Top 3 principales predichos")
     dessert_prediction: list[OCRPredictedDish] = Field(..., description="Top 3 postres predichos")
     model_version: str = Field(..., description="Versión del stack de modelos", example="azca_menu_v2")
+    execution_timestamp: datetime = Field(..., description="Timestamp de ejecución")
+
+
+class MenuOCRSectionsResponse(BaseModel):
+    """
+    Respuesta OCR pura (sin predicción) para inspeccionar secciones detectadas.
+    """
+
+    ocr_provider: str = Field(..., description="Proveedor OCR usado", example="azure_document_intelligence")
+    extracted_menu: OCRExtractedMenu = Field(..., description="Platos detectados desde el menú")
+    raw_text: str = Field(..., description="Texto OCR completo para depuración")
     execution_timestamp: datetime = Field(..., description="Timestamp de ejecución")
 
 
@@ -934,6 +945,129 @@ def to_ranked_dishes(items: list[tuple[str, float]]) -> list[OCRPredictedDish]:
         OCRPredictedDish(rank=index + 1, name=name, score=float(score))
         for index, (name, score) in enumerate(items[:3])
     ]
+
+
+def build_extracted_menu(sections) -> OCRExtractedMenu:
+    """Convierte la salida del extractor en el modelo de respuesta estándar."""
+    return OCRExtractedMenu(
+        starter=sections.starter,
+        main=sections.main,
+        dessert=sections.dessert,
+        starter_options=sections.starter_options,
+        main_options=sections.main_options,
+        dessert_options=sections.dessert_options,
+        detected_lines=sections.detected_lines,
+    )
+
+
+def persist_extracted_dishes(db: Session, sections) -> int:
+    """
+    Persiste los platos extraídos por OCR en dim_dishes.
+
+    course_type usa los valores: first_course, second_course, dessert.
+    """
+    grouped_dishes = {
+        "first_course": sections.starter_options,
+        "second_course": sections.main_options,
+        "dessert": sections.dessert_options,
+    }
+
+    inserted = 0
+    seen: set[tuple[str, str]] = set()
+
+    try:
+        for course_type, dishes in grouped_dishes.items():
+            for dish_name in dishes:
+                normalized_name = (dish_name or "").strip()
+                if not normalized_name:
+                    continue
+
+                dedupe_key = (course_type, normalized_name.casefold())
+                if dedupe_key in seen:
+                    continue
+                seen.add(dedupe_key)
+
+                existing = (
+                    db.query(DimDish.dish_id)
+                    .filter(
+                        DimDish.course_type == course_type,
+                        func.lower(DimDish.dish_name) == normalized_name.lower(),
+                    )
+                    .first()
+                )
+                if existing:
+                    continue
+
+                db.add(DimDish(course_type=course_type, dish_name=normalized_name))
+                inserted += 1
+
+        if inserted > 0:
+            db.commit()
+        else:
+            db.flush()
+
+        return inserted
+
+    except Exception:
+        db.rollback()
+        raise
+
+
+@app.post(
+    "/ocr/menu-sections",
+    response_model=MenuOCRSectionsResponse,
+    summary="Subir menú y ver solo detección OCR por secciones",
+    tags=["Predictions"],
+    status_code=status.HTTP_200_OK,
+)
+async def extract_menu_sections_ocr_only(
+    menu_file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """
+    Flujo OCR puro (sin predicción ML):
+    1) OCR con Azure Document Intelligence.
+    2) Parser para detectar entrante, principal y postre.
+
+    Request multipart/form-data:
+    - menu_file: archivo (PDF/JPG/PNG, etc.)
+    """
+    try:
+        file_bytes = await menu_file.read()
+        if not file_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El archivo de menú está vacío.",
+            )
+
+        raw_text, ocr_provider = extract_menu_text_with_default_ocr(
+            file_bytes=file_bytes,
+            content_type=menu_file.content_type,
+        )
+        sections = MenuSectionExtractor.extract(raw_text)
+        persist_extracted_dishes(db, sections)
+
+        return MenuOCRSectionsResponse(
+            ocr_provider=ocr_provider,
+            extracted_menu=build_extracted_menu(sections),
+            raw_text=raw_text,
+            execution_timestamp=datetime.now(),
+        )
+
+    except HTTPException:
+        raise
+    except RuntimeError as runtime_error:
+        logger.error(f"OCR no disponible: {runtime_error}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(runtime_error),
+        )
+    except Exception as exc:
+        logger.error(f"Error en /ocr/menu-sections: {exc}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error interno al procesar OCR del menú.",
+        )
 
 
 @app.post(
@@ -1526,6 +1660,7 @@ async def predict_from_menu_upload(
 
         # Detección de secciones del menú
         sections = MenuSectionExtractor.extract(raw_text)
+        persist_extracted_dishes(db, sections)
 
         # Variables contextuales automáticas (similares al flujo actual)
         weather_data = get_weather_data(service_date)
@@ -1550,15 +1685,7 @@ async def predict_from_menu_upload(
             restaurant_id=restaurant_id,
             service_date=service_date,
             ocr_provider=ocr_provider,
-            extracted_menu=OCRExtractedMenu(
-                starter=sections.starter,
-                main=sections.main,
-                dessert=sections.dessert,
-                starter_options=sections.starter_options,
-                main_options=sections.main_options,
-                dessert_options=sections.dessert_options,
-                detected_lines=sections.detected_lines,
-            ),
+            extracted_menu=build_extracted_menu(sections),
             starter_prediction=to_ranked_dishes(predictions["starter"]),
             main_prediction=to_ranked_dishes(predictions["main"]),
             dessert_prediction=to_ranked_dishes(predictions["dessert"]),
