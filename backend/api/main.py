@@ -16,21 +16,37 @@ import logging
 import os
 from datetime import datetime, date, timedelta
 from pathlib import Path
+from typing import Literal
 
 import holidays
 import requests
-from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, or_, text
 from pydantic import BaseModel, Field
 
-from ..db import get_db, init_db, PredictionLog, Restaurant, FactServices, SessionLocal, DimDish, MenusAzca
+from ..db import (
+    get_db,
+    init_db,
+    engine,
+    PredictionLog,
+    Restaurant,
+    FactServices,
+    SessionLocal,
+    DimDish,
+    MenusAzca,
+    Inscripcion,
+    SEGMENT_OPTIONS,
+    TERRACE_OPTIONS,
+    CUISINE_OPTIONS,
+)
 from ..core.menu_intelligence import (
     DocumentIntelligenceOCR,
     MenuMLPredictor,
     MenuSectionExtractor,
 )
+from ..core.auth import create_access_token, decode_access_token
 
 # Importar PredictionEngine - pero con fallback si falta
 try:
@@ -539,6 +555,7 @@ class RestaurantDetailItem(BaseModel):
     dist_office_towers: int | None = Field(None, description="Distancia a torres de oficina (metros)")
     google_rating: float | None = Field(None, description="Calificación Google")
     cuisine_type: str | None = Field(None, description="Tipo de cocina")
+    image_url: str | None = Field(None, description="URL de imagen pública del restaurante")
 
     class Config:
         from_attributes = True
@@ -550,6 +567,131 @@ class RestaurantsListResponse(BaseModel):
     """
     count: int = Field(..., description="Cantidad total de restaurantes")
     restaurants: list[RestaurantItem] = Field(..., description="Lista de restaurantes")
+
+
+class InscripcionCreateRequest(BaseModel):
+    """Modelo de alta para solicitudes en dbo.inscripciones."""
+
+    name: str = Field(..., description="Nombre del restaurante", min_length=1)
+    capacity_limit: int | None = Field(None, description="Límite de capacidad", ge=1)
+    table_count: int | None = Field(None, description="Cantidad de mesas", ge=1)
+    min_service: str | None = Field(None, description="Duración mínima del servicio (texto)")
+    terrace_setup_type: Literal[
+        "yearround",
+        "summer",
+        "none",
+    ] | None = Field(None, description="Tipo de terraza")
+    opens_weekends: bool | None = Field(None, description="Abre fines de semana")
+    has_wifi: bool | None = Field(None, description="Tiene WiFi")
+    restaurant_segment: Literal[
+        "gourmet",
+        "traditional",
+        "business",
+        "family",
+    ] | None = Field(None, description="Segmento del restaurante")
+    menu_price: float | None = Field(None, description="Precio medio del menú", ge=0)
+    dist_office_towers: int | None = Field(None, description="Distancia a oficinas en metros", ge=0)
+    google_rating: float | None = Field(None, description="Valoración media (0-5)", ge=0, le=5)
+    cuisine_type: Literal[
+        "grill",
+        "spanish",
+        "mediterranean",
+        "stew",
+        "fried",
+        "italian",
+        "asian",
+        "latin",
+        "arabic",
+        "avantgarde",
+        "plantbased",
+        "streetfood",
+    ] | None = Field(None, description="Tipo de cocina")
+    image_url: str | None = Field(None, description="URL inicial de imagen del restaurante")
+    google_maps_link: str = Field(..., description="Link de reseñas/Google Maps (obligatorio)", min_length=5)
+
+
+class InscripcionItem(BaseModel):
+    """Modelo de respuesta para una solicitud en dbo.inscripciones."""
+
+    inscripcion_id: int
+    name: str
+    capacity_limit: int | None = None
+    table_count: int | None = None
+    min_service: str | None = None
+    terrace_setup_type: str | None = None
+    opens_weekends: bool | None = None
+    has_wifi: bool | None = None
+    restaurant_segment: str | None = None
+    menu_price: float | None = None
+    dist_office_towers: int | None = None
+    google_rating: float | None = None
+    cuisine_type: str | None = None
+    login_email: str | None = None
+    image_url: str | None = None
+    google_maps_link: str
+    estado_inscripcion: str | None = None
+    fecha_solicitud: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class InscripcionesListResponse(BaseModel):
+    """Respuesta para listados de inscripciones."""
+
+    count: int
+    inscripciones: list[InscripcionItem]
+
+
+class InscripcionActionResponse(BaseModel):
+    """Respuesta estándar para acciones administrativas sobre inscripciones."""
+
+    inscripcion_id: int
+    status: str
+    message: str
+    restaurant_id: int | None = None
+
+
+class ClearApprovalHistoryResponse(BaseModel):
+    """Respuesta para limpieza del historial de aprobaciones."""
+
+    deleted_count: int
+    message: str
+
+
+class LoginRequest(BaseModel):
+    role: Literal["admin"]
+    email: str = Field(..., min_length=3)
+    password: str = Field(..., min_length=3)
+
+
+class AuthUserResponse(BaseModel):
+    role: Literal["admin"]
+    restaurant_id: int | None = None
+    restaurant_name: str | None = None
+    email: str
+    token: str
+
+
+class RestaurantImageUpdateRequest(BaseModel):
+    image_url: str = Field(..., min_length=5)
+
+
+def _extract_bearer_token(authorization: str | None) -> str | None:
+    if not authorization:
+        return None
+    prefix = "Bearer "
+    if not authorization.startswith(prefix):
+        return None
+    return authorization[len(prefix):].strip()
+
+
+def _require_auth(authorization: str | None) -> dict:
+    token = _extract_bearer_token(authorization)
+    payload = decode_access_token(token) if token else None
+    if not payload:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sesión no válida.")
+    return payload
 
 
 # ============================================================================
@@ -582,6 +724,50 @@ app.add_middleware(
 prediction_engine: PredictionEngine | None = None
 
 
+def _ensure_auth_columns_exist() -> None:
+    """Crea columnas nuevas si la BD existente aún no fue migrada."""
+    statements = [
+        """
+        IF COL_LENGTH('dbo.inscripciones', 'login_email') IS NULL
+            ALTER TABLE dbo.inscripciones ADD login_email NVARCHAR(255) NULL;
+        """,
+        """
+        IF COL_LENGTH('dbo.inscripciones', 'password_hash') IS NULL
+            ALTER TABLE dbo.inscripciones ADD password_hash NVARCHAR(255) NULL;
+        """,
+        """
+        IF COL_LENGTH('dbo.inscripciones', 'image_url') IS NULL
+            ALTER TABLE dbo.inscripciones ADD image_url NVARCHAR(500) NULL;
+        """,
+        """
+        IF COL_LENGTH('dbo.dim_restaurants', 'login_email') IS NULL
+            ALTER TABLE dbo.dim_restaurants ADD login_email NVARCHAR(255) NULL;
+        """,
+        """
+        IF COL_LENGTH('dbo.dim_restaurants', 'password_hash') IS NULL
+            ALTER TABLE dbo.dim_restaurants ADD password_hash NVARCHAR(255) NULL;
+        """,
+        """
+        IF COL_LENGTH('dbo.dim_restaurants', 'image_url') IS NULL
+            ALTER TABLE dbo.dim_restaurants ADD image_url NVARCHAR(500) NULL;
+        """,
+        """
+        IF NOT EXISTS (
+            SELECT 1
+            FROM sys.indexes
+            WHERE name = 'ux_dim_restaurants_login_email'
+        )
+            CREATE UNIQUE INDEX ux_dim_restaurants_login_email
+            ON dbo.dim_restaurants(login_email)
+            WHERE login_email IS NOT NULL;
+        """,
+    ]
+
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+
+
 # ============================================================================
 # EVENTOS DE STARTUP Y SHUTDOWN
 # ============================================================================
@@ -601,6 +787,7 @@ async def startup_event():
     try:
         # Inicializar base de datos
         init_db()
+        _ensure_auth_columns_exist()
         
         # Intentar conectar y cargar restaurantes
         try:
@@ -730,6 +917,336 @@ async def get_restaurant_detail(restaurant_id: int, db: Session = Depends(get_db
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error al obtener detalles del restaurante"
         )
+
+
+def _parse_min_service_duration(min_service: str | None) -> int | None:
+    """Convierte min_service (nvarchar) a entero de minutos si es posible."""
+    if not min_service:
+        return None
+
+    digits = "".join(char for char in str(min_service) if char.isdigit())
+    if not digits:
+        return None
+
+    try:
+        parsed = int(digits)
+        return parsed if parsed > 0 else None
+    except ValueError:
+        return None
+
+
+@app.post(
+    "/inscripciones",
+    response_model=InscripcionItem,
+    summary="Crear Solicitud de Inscripción",
+    tags=["Data"],
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_inscripcion(request: InscripcionCreateRequest, db: Session = Depends(get_db)):
+    """Crea una solicitud de alta en dbo.inscripciones."""
+    try:
+        inscripcion = Inscripcion(
+            name=request.name.strip(),
+            capacity_limit=request.capacity_limit,
+            table_count=request.table_count,
+            min_service=request.min_service,
+            terrace_setup_type=request.terrace_setup_type,
+            opens_weekends=request.opens_weekends,
+            has_wifi=request.has_wifi,
+            restaurant_segment=request.restaurant_segment,
+            menu_price=request.menu_price,
+            dist_office_towers=request.dist_office_towers,
+            google_rating=request.google_rating,
+            cuisine_type=request.cuisine_type,
+            image_url=request.image_url.strip() if request.image_url else None,
+            google_maps_link=request.google_maps_link.strip(),
+            estado_inscripcion="pendiente",
+            fecha_solicitud=datetime.now(),
+        )
+
+        db.add(inscripcion)
+        db.commit()
+        db.refresh(inscripcion)
+        return InscripcionItem.from_orm(inscripcion)
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"❌ Error en POST /inscripciones: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error al crear solicitud de inscripción",
+        )
+
+
+@app.get(
+    "/inscripciones/pending",
+    response_model=InscripcionesListResponse,
+    summary="Obtener Inscripciones Pendientes",
+    tags=["Data"],
+)
+async def get_pending_inscripciones(db: Session = Depends(get_db)):
+    """Obtiene solicitudes pendientes desde dbo.inscripciones."""
+    try:
+        rows = (
+            db.query(Inscripcion)
+            .filter(
+                or_(
+                    Inscripcion.estado_inscripcion.is_(None),
+                    func.lower(Inscripcion.estado_inscripcion) == "pendiente",
+                )
+            )
+            .order_by(desc(Inscripcion.fecha_solicitud), desc(Inscripcion.inscripcion_id))
+            .all()
+        )
+
+        return InscripcionesListResponse(
+            count=len(rows),
+            inscripciones=[InscripcionItem.from_orm(row) for row in rows],
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Error en GET /inscripciones/pending: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error al obtener inscripciones pendientes",
+        )
+
+
+@app.get(
+    "/inscripciones",
+    response_model=InscripcionesListResponse,
+    summary="Obtener Inscripciones",
+    tags=["Data"],
+)
+async def get_inscripciones(
+    status_filter: str | None = Query(default=None, alias="status"),
+    db: Session = Depends(get_db),
+):
+    """Obtiene inscripciones con filtro opcional por estado."""
+    try:
+        query = db.query(Inscripcion)
+
+        if status_filter:
+            normalized = status_filter.strip().lower()
+            query = query.filter(func.lower(func.coalesce(Inscripcion.estado_inscripcion, "")) == normalized)
+
+        rows = query.order_by(desc(Inscripcion.fecha_solicitud), desc(Inscripcion.inscripcion_id)).all()
+
+        return InscripcionesListResponse(
+            count=len(rows),
+            inscripciones=[InscripcionItem.from_orm(row) for row in rows],
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Error en GET /inscripciones: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error al obtener inscripciones",
+        )
+
+
+@app.post(
+    "/inscripciones/{inscripcion_id}/approve",
+    response_model=InscripcionActionResponse,
+    summary="Aprobar Inscripción",
+    tags=["Data"],
+)
+async def approve_inscripcion(inscripcion_id: int, db: Session = Depends(get_db)):
+    """
+    Aprueba una inscripción:
+    - Inserta los datos del restaurante en dim_restaurants.
+    - Marca la inscripción como Aprobada.
+    """
+    try:
+        inscripcion = (
+            db.query(Inscripcion)
+            .filter(Inscripcion.inscripcion_id == inscripcion_id)
+            .first()
+        )
+
+        if not inscripcion:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Inscripción con ID {inscripcion_id} no encontrada",
+            )
+
+        restaurant_data = {
+            "name": inscripcion.name,
+            "capacity_limit": inscripcion.capacity_limit,
+            "table_count": inscripcion.table_count,
+            "min_service_duration": _parse_min_service_duration(inscripcion.min_service),
+            "terrace_setup_type": inscripcion.terrace_setup_type,
+            "opens_weekends": inscripcion.opens_weekends,
+            "has_wifi": inscripcion.has_wifi,
+            "restaurant_segment": inscripcion.restaurant_segment,
+            "menu_price": inscripcion.menu_price,
+            "dist_office_towers": inscripcion.dist_office_towers,
+            "google_rating": inscripcion.google_rating,
+            "cuisine_type": inscripcion.cuisine_type,
+            "login_email": inscripcion.login_email,
+            "password_hash": inscripcion.password_hash,
+            "image_url": inscripcion.image_url,
+        }
+
+        next_restaurant_id = (db.query(func.max(Restaurant.restaurant_id)).scalar() or 0) + 1
+        restaurant = Restaurant(restaurant_id=next_restaurant_id, **restaurant_data)
+
+        db.add(restaurant)
+        db.flush()
+
+        db.delete(inscripcion)
+        db.commit()
+        db.refresh(restaurant)
+
+        return InscripcionActionResponse(
+            inscripcion_id=inscripcion_id,
+            status="aprobada",
+            message="Inscripción aprobada, movida a restaurantes y eliminada de inscripciones.",
+            restaurant_id=restaurant.restaurant_id,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"❌ Error en POST /inscripciones/{inscripcion_id}/approve: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error al aprobar inscripción",
+        )
+
+
+@app.post(
+    "/inscripciones/{inscripcion_id}/reject",
+    response_model=InscripcionActionResponse,
+    summary="Solicitar Cambios o Rechazar Inscripción",
+    tags=["Data"],
+)
+async def reject_inscripcion(inscripcion_id: int, db: Session = Depends(get_db)):
+    """Rechaza una inscripción y la elimina de la tabla de pendientes."""
+    try:
+        inscripcion = (
+            db.query(Inscripcion)
+            .filter(Inscripcion.inscripcion_id == inscripcion_id)
+            .first()
+        )
+
+        if not inscripcion:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Inscripción con ID {inscripcion_id} no encontrada",
+            )
+
+        db.delete(inscripcion)
+        db.commit()
+
+        return InscripcionActionResponse(
+            inscripcion_id=inscripcion_id,
+            status="rechazada",
+            message="Inscripción rechazada y eliminada de pendientes.",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"❌ Error en POST /inscripciones/{inscripcion_id}/reject: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error al actualizar inscripción",
+        )
+
+
+@app.delete(
+    "/inscripciones/history/approved",
+    response_model=ClearApprovalHistoryResponse,
+    summary="Limpiar Historial de Aprobaciones",
+    tags=["Data"],
+)
+async def clear_approval_history(db: Session = Depends(get_db)):
+    """Elimina del histórico las inscripciones con estado Aprobada."""
+    try:
+        approved_query = db.query(Inscripcion).filter(
+            func.lower(func.coalesce(Inscripcion.estado_inscripcion, "")) == "aprobada"
+        )
+        deleted_count = approved_query.count()
+
+        if deleted_count > 0:
+            approved_query.delete(synchronize_session=False)
+
+        db.commit()
+
+        return ClearApprovalHistoryResponse(
+            deleted_count=deleted_count,
+            message="Historial de aprobaciones limpiado correctamente.",
+        )
+
+    except Exception as e:
+        db.rollback()
+        logger.error("❌ Error en DELETE /inscripciones/history/approved: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error al limpiar historial de aprobaciones",
+        )
+
+
+@app.post(
+    "/auth/login",
+    response_model=AuthUserResponse,
+    summary="Iniciar sesión",
+    tags=["Auth"],
+)
+async def login(request: LoginRequest, db: Session = Depends(get_db)):
+    admin_email = os.getenv("ADMIN_EMAIL", "admin@cuisineaml.com").strip().lower()
+    admin_password = os.getenv("ADMIN_PASSWORD", "admin123456")
+
+    if request.email.strip().lower() != admin_email or request.password != admin_password:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciales de administrador no válidas.")
+
+    token = create_access_token({"role": "admin", "email": admin_email})
+    return AuthUserResponse(role="admin", email=admin_email, token=token)
+
+
+@app.get(
+    "/auth/me",
+    response_model=AuthUserResponse,
+    summary="Obtener sesión actual",
+    tags=["Auth"],
+)
+async def auth_me(authorization: str | None = Header(default=None)):
+    payload = _require_auth(authorization)
+
+    if payload.get("role") != "admin":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sesión no válida para administrador.")
+
+    token = _extract_bearer_token(authorization) or ""
+    return AuthUserResponse(role="admin", email=payload.get("email", ""), token=token)
+
+
+@app.patch(
+    "/restaurants/{restaurant_id}/image",
+    response_model=RestaurantDetailItem,
+    summary="Actualizar imagen del restaurante",
+    tags=["Data"],
+)
+async def update_restaurant_image(
+    restaurant_id: int,
+    request: RestaurantImageUpdateRequest,
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    payload = _require_auth(authorization)
+    if payload.get("role") != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado.")
+
+    restaurant = db.query(Restaurant).filter(Restaurant.restaurant_id == restaurant_id).first()
+    if not restaurant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Restaurante no encontrado.")
+
+    restaurant.image_url = request.image_url.strip()
+    db.commit()
+    db.refresh(restaurant)
+    return RestaurantDetailItem.from_orm(restaurant)
 
 
 

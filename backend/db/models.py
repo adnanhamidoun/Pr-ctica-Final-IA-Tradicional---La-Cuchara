@@ -11,9 +11,27 @@ Classes:
 """
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, Float, DateTime, Date, Boolean, String, Text
+from sqlalchemy import Column, Integer, Float, DateTime, Date, Boolean, String, Text, CheckConstraint
 from sqlalchemy.sql import func
 from .database import Base
+
+
+SEGMENT_OPTIONS = ("gourmet", "traditional", "business", "family")
+TERRACE_OPTIONS = ("yearround", "summer", "none")
+CUISINE_OPTIONS = (
+    "grill",
+    "spanish",
+    "mediterranean",
+    "stew",
+    "fried",
+    "italian",
+    "asian",
+    "latin",
+    "arabic",
+    "avantgarde",
+    "plantbased",
+    "streetfood",
+)
 
 
 class Restaurant(Base):
@@ -23,8 +41,22 @@ class Restaurant(Base):
     Contiene toda la información de los restaurantes para predicción.
     """
     __tablename__ = "dim_restaurants"
+    __table_args__ = (
+        CheckConstraint(
+            "restaurant_segment IN ('gourmet','traditional','business','family')",
+            name="ck_dim_restaurants_segment",
+        ),
+        CheckConstraint(
+            "terrace_setup_type IN ('yearround','summer','none')",
+            name="ck_dim_restaurants_terrace",
+        ),
+        CheckConstraint(
+            "cuisine_type IN ('grill','spanish','mediterranean','stew','fried','italian','asian','latin','arabic','avantgarde','plantbased','streetfood')",
+            name="ck_dim_restaurants_cuisine",
+        ),
+    )
     
-    restaurant_id = Column(Integer, primary_key=True)
+    restaurant_id = Column(Integer, primary_key=True, autoincrement=False)
     name = Column(String(255), nullable=False)
     capacity_limit = Column(Integer, nullable=True)
     table_count = Column(Integer, nullable=True)
@@ -37,9 +69,62 @@ class Restaurant(Base):
     dist_office_towers = Column(Integer, nullable=True)
     google_rating = Column(Float, nullable=True)
     cuisine_type = Column(String(100), nullable=True)
+    login_email = Column(String(255), nullable=True, unique=True)
+    password_hash = Column(String(255), nullable=True)
+    image_url = Column(String(500), nullable=True)
     
     def __repr__(self):
         return f"<Restaurant(id={self.restaurant_id}, name='{self.name}')>"
+
+
+class Inscripcion(Base):
+    """
+    Modelo ORM para la tabla dbo.inscripciones.
+
+    Almacena solicitudes de alta de restaurantes pendientes de revisión administrativa.
+    """
+
+    __tablename__ = "inscripciones"
+    __table_args__ = (
+        CheckConstraint(
+            "restaurant_segment IN ('gourmet','traditional','business','family')",
+            name="ck_inscripciones_segment",
+        ),
+        CheckConstraint(
+            "terrace_setup_type IN ('yearround','summer','none')",
+            name="ck_inscripciones_terrace",
+        ),
+        CheckConstraint(
+            "cuisine_type IN ('grill','spanish','mediterranean','stew','fried','italian','asian','latin','arabic','avantgarde','plantbased','streetfood')",
+            name="ck_inscripciones_cuisine",
+        ),
+    )
+
+    inscripcion_id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(255), nullable=False)
+    capacity_limit = Column(Integer, nullable=True)
+    table_count = Column(Integer, nullable=True)
+    min_service = Column(String(100), nullable=True)
+    terrace_setup_type = Column(String(100), nullable=True)
+    opens_weekends = Column(Boolean, nullable=True)
+    has_wifi = Column(Boolean, nullable=True)
+    restaurant_segment = Column(String(100), nullable=True)
+    menu_price = Column(Float, nullable=True)
+    dist_office_towers = Column(Integer, nullable=True)
+    google_rating = Column(Float, nullable=True)
+    cuisine_type = Column(String(100), nullable=True)
+    login_email = Column(String(255), nullable=True)
+    password_hash = Column(String(255), nullable=True)
+    image_url = Column(String(500), nullable=True)
+    google_maps_link = Column(String(500), nullable=False)
+    estado_inscripcion = Column(String(100), nullable=True)
+    fecha_solicitud = Column(DateTime, nullable=True, default=datetime.utcnow)
+
+    def __repr__(self):
+        return (
+            f"<Inscripcion(id={self.inscripcion_id}, name='{self.name}', "
+            f"estado='{self.estado_inscripcion}')>"
+        )
 
 
 class DimDish(Base):
