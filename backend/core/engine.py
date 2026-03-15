@@ -20,6 +20,10 @@ class PredictionEngine:
         self.model_provider = ModelProvider(artifacts_path)
         self.pipeline = InferencePipeline(fixed_fields=pipeline_config)
 
+    def get_model_reference(self, model_name: str) -> str:
+        """Return the resolved model reference (e.g. azca-services-model:12)."""
+        return self.model_provider.get_model_reference(model_name)
+
     def predict(self, model_name: str, data: dict) -> int:
         """
         Load model, build features, and return prediction.
